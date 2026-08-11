@@ -94,7 +94,9 @@ a{color:var(--accent);text-decoration:none}
 .row .call:active{background:#202020}
 .sc{font-family:var(--mono);font-size:11px;color:var(--dim);
   border:1px solid var(--line);border-radius:5px;padding:0 4px;margin-left:6px;
-  font-variant-numeric:tabular-nums}
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.sc.who{font-family:var(--sans);color:var(--muted)}
+.sc.none{font-family:var(--sans);color:var(--warn);border-color:rgba(255,176,32,.35)}
 
 /* ============ ЧИПЫ ============ */
 .chips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 12px;
@@ -129,6 +131,17 @@ a{color:var(--accent);text-decoration:none}
   font-weight:600;background:var(--raised);border:1px solid var(--line)}
 .badge2.go{background:rgba(0,230,118,.13);border-color:rgba(0,230,118,.3);color:var(--accent)}
 .badge2.no{background:rgba(255,82,82,.12);border-color:rgba(255,82,82,.3);color:var(--danger)}
+
+/* ============ ЛПР ============ */
+.card.dm{border-color:rgba(0,230,118,.28);background:linear-gradient(180deg,rgba(0,230,118,.05),transparent 70%)}
+.dm-who b{display:block;font-size:17px;font-weight:650;letter-spacing:-.01em}
+.dm-who span{display:block;font-size:13px;color:var(--muted);margin-top:1px}
+.dm-who .dm-tel{display:inline-block;margin-top:6px;font-family:var(--mono);font-size:15px}
+.dm-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:13px}
+.dmblock{border:1px solid var(--line);border-radius:var(--r);padding:2px 13px 14px;
+  margin:18px 0 4px;background:var(--surface)}
+.dmhead{font-size:12px;font-weight:650;color:var(--accent);text-transform:uppercase;
+  letter-spacing:.08em;margin:14px 0 0}
 
 /* ============ ЖУРНАЛ ============ */
 .log{position:relative;padding-left:18px}
@@ -228,8 +241,8 @@ const IC = {
   pin:'<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10.5c0 5.6-8 12-8 12s-8-6.4-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10.3" r="2.9"/></svg>'
 };
 
-const S = { user:null, prof:null, view:'today', lead:null, tariffs:[],
-            data:[], stats:null, log:[], filter:'all', q:'', busy:false };
+const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
+            data:[], stats:null, log:[], filter:'all', own:'mine', q:'', busy:false };
 
 /* ─────────── СЕТЬ ─────────── */
 const LS = { get:k=>{try{return JSON.parse(localStorage.getItem(k))}catch{return null}},
@@ -334,6 +347,7 @@ async function boot(){
     if(!p.length){ S.prof=null; return render(); }
     S.prof = p[0];
     S.tariffs = await db('tariffs?select=*&order=sort_order');
+    if(S.prof.role==='admin') S.staff = await db('profiles?select=id,name,role&order=name');
     await load();
   }catch(e){ toast(e.message, true); }
   render();
@@ -348,6 +362,8 @@ async function load(){
     if(S.filter==='open') f = `&status=in.(${OPEN_ST.join(',')})`;
     else if(S.filter!=='all') f = `&status=eq.${S.filter}`;
     if(S.q) f += `&company_name=ilike.*${encodeURIComponent(S.q)}*`;
+    if(S.own==='mine') f += `&or=(owner_id.eq.${S.prof.id},owner_id.is.null)`;
+    else if(S.own==='none') f += `&owner_id=is.null`;
     S.data = await db(`v_leads?select=*${f}&order=score.desc,company_name.asc`);
   }
 }
@@ -464,10 +480,13 @@ function row(l){
   else bits.push(STATUS[l.status]);
   if(l.segment) bits.push(esc(l.segment));
   if(l.mrr_amount) bits.push(money(l.mrr_amount)+'/мес');
+  const own = (S.own!=='mine' && S.view==='list')
+    ? (l.owner_name ? `<span class="sc who">${esc(l.owner_name.split(' ')[0])}</span>`
+                    : `<span class="sc none">ничей</span>`) : '';
   return `<div class="row">
     <div class="rail ${rail}"></div>
     <button class="body" data-lead="${l.id}">
-      <div class="nm">${esc(l.company_name)}${l.kind==='channel'?' <span class="sc">канал</span>':''}<span class="sc">${l.score}</span></div>
+      <div class="nm">${esc(l.company_name)}${l.kind==='channel'?' <span class="sc">канал</span>':''}<span class="sc">${l.score}</span>${own}</div>
       <div class="meta">${bits.join(' · ')}</div>
     </button>
     ${l.primary_phone?`<a class="call" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`:''}
@@ -477,9 +496,12 @@ function row(l){
 /* ── СПИСОК ── */
 function listScreen(){
   const f=[['all','Все'],['open','В работе'],...Object.entries(STATUS)];
+  const o=[['mine','Мои'],['all','Все ответственные'],['none','Ничьи']];
   const head=`<div class="topbar"><h1>Лиды<span class="sub">${S.data.length} записей</span></h1></div>
   <div class="wrap" style="padding-bottom:0">
     <input id="q" type="text" placeholder="Поиск по названию" value="${esc(S.q)}" style="margin-bottom:12px">
+    <div class="chips">${o.map(([k,v])=>
+      `<button class="chip ${S.own===k?'on':''}" data-o="${k}">${v}</button>`).join('')}</div>
     <div class="chips">${f.map(([k,v])=>
       `<button class="chip ${S.filter===k?'on':''}" data-f="${k}">${v}</button>`).join('')}</div>
   </div>`;
@@ -510,6 +532,22 @@ function leadScreen(){
   </div>`;
 
   const kv=(k,v,num)=>v==null||v===''?'':`<div class="kv"><dt>${k}</dt><dd class="${num?'num':''}">${v}</dd></div>`;
+
+  const dmWa = l.dm_phone ? `https://wa.me/${l.dm_phone.replace('+','')}` : null;
+  const dm = (l.dm_name||l.dm_phone||l.dm_position) ? `<div class="card dm">
+    <h3>Лицо, принимающее решение</h3>
+    <div class="dm-top">
+      <div class="dm-who">
+        <b>${esc(l.dm_name||'Имя не указано')}</b>
+        ${l.dm_position?`<span>${esc(l.dm_position)}</span>`:''}
+        ${l.dm_phone?`<a href="tel:${l.dm_phone}" class="dm-tel">${fmtPhone(l.dm_phone)}</a>`:''}
+      </div>
+    </div>
+    ${l.dm_phone?`<div class="dm-btns">
+      <a class="act primary" href="tel:${l.dm_phone}"><span class="ic">${IC.phone}</span>Позвонить ЛПР</a>
+      <a class="act" href="${dmWa}" target="_blank" rel="noopener"><span class="ic">${IC.chat}</span>WhatsApp</a>
+    </div>`:''}
+  </div>` : '';
   const info=`<div class="card"><h3>Компания</h3>
     ${kv('Телефон', l.primary_phone?`<a href="tel:${l.primary_phone}">${fmtPhone(l.primary_phone)}</a>`:'', 1)}
     ${kv('Сегмент', esc(l.segment))}
@@ -518,7 +556,10 @@ function leadScreen(){
     ${kv('Средний чек', l.avg_check?money(l.avg_check):'', 1)}
     ${kv('Онлайн-заказ', l.has_online_order?'<span class="badge2 go">есть</span>':'')}
     ${kv('Своё приложение', l.has_own_app?'<span class="badge2 go">есть</span>':'')}
-    ${kv('Приоритет', `${l.score} из 11`, 1)}
+    ${kv('Ответственный', l.owner_name
+        ? esc(l.owner_name) + (l.is_mine?' <span class="badge2 go">это я</span>':'')
+        : '<span class="badge2">ничей</span>')}
+    ${kv('Приоритет', `${l.score} из 13`, 1)}
     ${kv('Касаний', l.touch_count, 1)}
     ${kv('Последнее', l.last_touch_at?human(l.last_touch_at):'—')}
   </div>`;
@@ -541,11 +582,22 @@ function leadScreen(){
     ${S.log.length?`<div class="log">${S.log.map(ev).join('')}</div>`
     :`<p style="margin:0;color:var(--dim);font-size:14px">Касаний пока не было</p>`}</div>`;
 
+  const takeBtn = (!l.owner_id && !isAdmin())
+    ? `<button class="btn ghost" data-take>Взять себе</button>` : '';
+  const reassign = isAdmin() ? `<div class="card"><h3>Ответственный</h3>
+    <select id="own_sel">
+      <option value="">Ничей</option>
+      ${S.staff.map(u=>`<option value="${u.id}" ${u.id===l.owner_id?'selected':''}>${
+        esc(u.name)}${u.role==='admin'?' (админ)':''}</option>`).join('')}
+    </select>
+    <button class="btn ghost" id="own_save" style="margin-top:10px">Переназначить</button>
+  </div>` : '';
   const btns=`<button class="btn" data-touch>Записать касание</button>
+    ${takeBtn}
     <button class="btn ghost" data-edit>Изменить карточку</button>
     ${isAdmin()?`<button class="btn warn" data-del>Удалить лид</button>`:''}`;
 
-  return head+`<div class="wrap">${acts}${info}${deal}${extra}${log}${btns}</div>`;
+  return head+`<div class="wrap">${acts}${dm}${info}${deal}${extra}${reassign}${log}${btns}</div>`;
 }
 
 function ev(a){
@@ -642,6 +694,8 @@ function touchSheet(){
     const gv=id=>d.querySelector('#'+id+' .chip.on')?.dataset.v;
     const status=st.value;
     const patch={ status, tariff:d.querySelector('#tf').value||null };
+    // Взял ничейный лид в работу — он твой
+    if(!S.lead.owner_id && !isAdmin()) patch.owner_id = S.prof.id;
     if(status==='lost') patch.lost_reason=d.querySelector('#lr').value;
     if(!['new','won','lost'].includes(status)){
       patch.next_action_at=d.querySelector('#nd').value;
@@ -670,6 +724,19 @@ function addScreen(){
     <input id="f_name" type="text" value="${esc(l.company_name||'')}" placeholder="Как называется заведение">
     <label for="f_phone">Телефон</label>
     <input id="f_phone" type="tel" inputmode="tel" value="${esc(l.primary_phone||'')}" placeholder="8 928 000-00-00">
+    <div class="dmblock">
+      <p class="dmhead">Лицо, принимающее решение</p>
+      <label for="f_dmname">Имя</label>
+      <input id="f_dmname" type="text" value="${esc(l.dm_name||'')}" placeholder="Как зовут">
+      <label for="f_dmpos">Должность</label>
+      <input id="f_dmpos" type="text" value="${esc(l.dm_position||'')}" placeholder="Собственник, управляющий" list="poss">
+      <datalist id="poss"><option>Собственник</option><option>Управляющий</option>
+        <option>Директор</option><option>Маркетолог</option><option>Администратор</option></datalist>
+      <label for="f_dmphone">Телефон ЛПР</label>
+      <input id="f_dmphone" type="tel" inputmode="tel" value="${esc(l.dm_phone||'')}"
+        placeholder="Если совпадает с основным — впиши тот же">
+    </div>
+
     <label for="f_seg">Сегмент</label>
     <input id="f_seg" type="text" value="${esc(l.segment||'')}" placeholder="Общепит" list="segs">
     <datalist id="segs"><option>Общепит</option><option>Розница</option><option>Услуги</option>
@@ -719,6 +786,33 @@ async function saveLead(){
     note:g('f_note')||null, todo:g('f_todo')||null,
     ...(S.editing?{}:{created_by:S.prof.id}) };
   const ph=phone(g('f_phone'));
+  const dm={ name:g('f_dmname')||null, position:g('f_dmpos')||null, phone:phone(g('f_dmphone')),
+             raw:g('f_dmphone')||null };
+  const hasDm = !!(dm.name || dm.position || dm.phone);
+
+  // ЛПР — контакт с пометкой. Если его номер совпадает с основным,
+  // не плодим вторую запись, а помечаем существующую.
+  async function saveDm(companyId, primaryPhone){
+    const rows = await db(`contacts?company_id=eq.${companyId}&select=id,phone_e164,is_primary,is_decision_maker`);
+    const cur = rows.find(r=>r.is_decision_maker);
+    if(!hasDm){
+      if(cur) await db(`contacts?id=eq.${cur.id}`,{method:'PATCH',prefer:'return=minimal',
+        body:JSON.stringify({is_decision_maker:false})});
+      return;
+    }
+    const same = dm.phone && primaryPhone && dm.phone===primaryPhone;
+    const target = same ? rows.find(r=>r.is_primary) : cur;
+    const payload = { name:dm.name, position:dm.position, is_decision_maker:true,
+                      ...(dm.phone?{phone_e164:dm.phone, phone_raw:dm.raw}:{}) };
+    if(same && cur && cur.id!==target?.id)
+      await db(`contacts?id=eq.${cur.id}`,{method:'PATCH',prefer:'return=minimal',
+        body:JSON.stringify({is_decision_maker:false})});
+    if(target) await db(`contacts?id=eq.${target.id}`,{method:'PATCH',prefer:'return=minimal',
+      body:JSON.stringify(payload)});
+    else await db('contacts',{method:'POST',prefer:'return=minimal',
+      body:JSON.stringify({company_id:companyId, ...payload})});
+  }
+
   try{
     if(S.editing){
       await db(`companies?id=eq.${S.editing.company_id}`,{method:'PATCH',prefer:'return=minimal',
@@ -730,11 +824,13 @@ async function saveLead(){
         else await db('contacts',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
           {company_id:S.editing.company_id, phone_e164:ph, phone_raw:g('f_phone'), is_primary:true})});
       }
+      await saveDm(S.editing.company_id, ph || S.editing.primary_phone);
       const id=S.editing.id; S.editing=null; toast('Сохранено'); await openLead(id);
     }else{
       const c=(await db('companies',{method:'POST',body:JSON.stringify(co)}))[0];
       if(ph) await db('contacts',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
         {company_id:c.id, phone_e164:ph, phone_raw:g('f_phone'), is_primary:true})});
+      await saveDm(c.id, ph);
       const ld=(await db('leads',{method:'POST',body:JSON.stringify(
         {company_id:c.id, status:'new', owner_id:S.prof.id})}))[0];
       toast('Лид создан'); await openLead(ld.id);
@@ -764,11 +860,13 @@ async function exportAll(){
   toast('Готовлю файл…');
   try{
     const rows=await db('v_leads?select=*&order=company_name');
-    const cols=['company_name','segment','kind','primary_phone','status','tariff',
+    const cols=['company_name','segment','kind','owner_name','primary_phone',
+      'dm_name','dm_position','dm_phone','status','tariff',
       'setup_amount','mrr_amount','next_action_at','next_action','lost_reason','score',
       'touch_count','last_touch_at','address','instagram_url','gis_url','site_url',
       'outlets_count','avg_check','has_online_order','has_own_app','note','todo'];
-    const head=['Компания','Сегмент','Тип','Телефон','Статус','Тариф','Внедрение','MRR',
+    const head=['Компания','Сегмент','Тип','Ответственный','Телефон',
+      'ЛПР','Должность ЛПР','Телефон ЛПР','Статус','Тариф','Внедрение','MRR',
       'След. шаг дата','След. шаг','Причина отказа','Приоритет','Касаний','Последнее касание',
       'Адрес','Instagram','2ГИС','Сайт','Точек','Средний чек','Онлайн-заказ','Своё приложение',
       'Заметка','Дособрать'];
@@ -875,6 +973,24 @@ function bind(){
     S.editing=null; go(S.lead && S.view!=='lead' ? 'lead' : 'today');
   });
   document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ S.filter=b.dataset.f; go('list'); });
+  document.querySelectorAll('[data-o]').forEach(b=>b.onclick=()=>{ S.own=b.dataset.o; go('list'); });
+
+  const take=document.querySelector('[data-take]');
+  if(take) take.onclick=async()=>{
+    try{ await db(`leads?id=eq.${S.lead.id}`,{method:'PATCH',prefer:'return=minimal',
+      body:JSON.stringify({owner_id:S.prof.id})});
+      toast('Лид закреплён за тобой'); await openLead(S.lead.id);
+    }catch(e){ toast(e.message,true); }
+  };
+
+  const os=document.getElementById('own_save');
+  if(os) os.onclick=async()=>{
+    const v=document.getElementById('own_sel').value||null;
+    try{ await db(`leads?id=eq.${S.lead.id}`,{method:'PATCH',prefer:'return=minimal',
+      body:JSON.stringify({owner_id:v})});
+      toast(v?'Ответственный изменён':'Лид снят с ответственного'); await openLead(S.lead.id);
+    }catch(e){ toast(e.message,true); }
+  };
 
   const q=document.getElementById('q');
   if(q){ let t; q.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ S.q=q.value.trim(); go('list'); },420); }; }
