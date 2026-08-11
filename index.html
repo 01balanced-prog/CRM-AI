@@ -990,15 +990,61 @@ function parsePaste(txt){
           err:rows.length?null:'Ни одной строки с названием'};
 }
 
+// Сверяет вставленное с тем, что уже в базе. Одним запросом, чтобы не долбить сеть.
+async function matchExisting(rows){
+  const have = await db('companies?select=id,name,segment,instagram_url,gis_url,site_url,outlets_count,note'
+                        + ',contacts(id,phone_e164,is_primary)');
+  const byName = new Map(have.map(c=>[c.name.trim().toLowerCase(), c]));
+  for(const r of rows){
+    const ex = byName.get(r.name.trim().toLowerCase());
+    r.existing = ex || null;
+    if(!ex){ r.action='new'; r.fills=[]; continue; }
+    // Дозаполняем только пустое. Что менеджер уже внёс руками — не трогаем.
+    const fills=[];
+    const prim = (ex.contacts||[]).find(x=>x.is_primary);
+    if(r.phone && !prim?.phone_e164) fills.push('телефон');
+    if(r.segment && !ex.segment) fills.push('сегмент');
+    if(r.instagram_url && !ex.instagram_url) fills.push('Instagram');
+    if(r.gis_url && !ex.gis_url) fills.push('2ГИС');
+    if(r.outlets_count && !ex.outlets_count) fills.push('точки');
+    if(r.note && !(ex.note||'').includes(r.note)) fills.push('заметка');
+    r.fills = fills;
+    r.action = fills.length ? 'update' : 'same';
+  }
+  return rows;
+}
+
 async function runImport(rows){
   const btn=document.getElementById('imp'); btn.disabled=true;
-  let ok=0, skip=0, fail=0;
+  let added=0, upd=0, same=0, fail=0;
   for(let i=0;i<rows.length;i++){
     const r=rows[i];
-    btn.textContent=`Загружаю ${i+1} из ${rows.length}…`;
+    btn.textContent=`Обрабатываю ${i+1} из ${rows.length}…`;
     try{
-      const ex=await db(`companies?name=ilike.${encodeURIComponent(r.name)}&select=id`);
-      if(ex.length){ skip++; continue; }
+      if(r.action==='same'){ same++; continue; }
+
+      if(r.action==='update'){
+        const ex=r.existing, patch={};
+        if(r.segment && !ex.segment) patch.segment=r.segment;
+        if(r.instagram_url && !ex.instagram_url) patch.instagram_url=r.instagram_url;
+        if(r.gis_url && !ex.gis_url) patch.gis_url=r.gis_url;
+        if(r.outlets_count && !ex.outlets_count) patch.outlets_count=r.outlets_count;
+        if(r.note && !(ex.note||'').includes(r.note))
+          patch.note = ex.note ? ex.note+'\n\n'+r.note : r.note;
+        if(Object.keys(patch).length)
+          await db(`companies?id=eq.${ex.id}`,{method:'PATCH',prefer:'return=minimal',
+            body:JSON.stringify(patch)});
+
+        const prim=(ex.contacts||[]).find(x=>x.is_primary);
+        if(r.phone && !prim?.phone_e164){
+          if(prim) await db(`contacts?id=eq.${prim.id}`,{method:'PATCH',prefer:'return=minimal',
+            body:JSON.stringify({phone_e164:r.phone, phone_raw:r.raw})});
+          else await db('contacts',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
+            {company_id:ex.id, phone_e164:r.phone, phone_raw:r.raw, is_primary:true})});
+        }
+        upd++; continue;
+      }
+
       const c=(await db('companies',{method:'POST',body:JSON.stringify({
         name:r.name, segment:r.segment, instagram_url:r.instagram_url,
         gis_url:r.gis_url, outlets_count:r.outlets_count, note:r.note,
@@ -1006,15 +1052,19 @@ async function runImport(rows){
       if(r.phone) await db('contacts',{method:'POST',prefer:'return=minimal',
         body:JSON.stringify({company_id:c.id, phone_e164:r.phone, phone_raw:r.raw, is_primary:true})});
       // Ответственного не ставим: загруженные пачкой лиды идут в общий пул,
-      // менеджер забирает их себе сам. Иначе они осели бы на админе и
-      // не попали бы менеджеру ни в «Мои», ни в «Сегодня».
+      // менеджер забирает их себе сам.
       await db('leads',{method:'POST',prefer:'return=minimal',
         body:JSON.stringify({company_id:c.id, status:'new'})});
-      ok++;
+      added++;
     }catch{ fail++; }
   }
-  toast(`Добавлено ${ok}${skip?`, пропущено дублей ${skip}`:''}${fail?`, ошибок ${fail}`:''}`, fail>0);
-  S.view='list'; S.filter='all'; S.own = ok ? 'none' : 'all'; go('list');
+  const parts=[];
+  if(added) parts.push(`добавлено ${added}`);
+  if(upd)   parts.push(`дозаполнено ${upd}`);
+  if(same)  parts.push(`без изменений ${same}`);
+  if(fail)  parts.push(`ошибок ${fail}`);
+  toast(parts.join(', ')||'Изменений нет', fail>0);
+  S.view='list'; S.filter='all'; S.own = added ? 'none' : 'all'; go('list');
 }
 
 /* ── НАВИГАЦИЯ ── */
@@ -1080,10 +1130,15 @@ function bind(){
   if(out && S.view==='more') out.onclick=()=>{ LS.del('sess'); S.user=null; S.prof=null; render(); };
 
   const prev=document.getElementById('prev');
-  if(prev) prev.onclick=()=>{
+  if(prev) prev.onclick=async()=>{
     const {rows,err,skipped:sk={},map={},cols=[]}=parsePaste(document.getElementById('paste').value);
     const box=document.getElementById('out');
     if(err) return box.innerHTML=`<p class="note" style="color:var(--danger)">${esc(err)}</p>`;
+    prev.disabled=true; prev.textContent='Сверяю с базой…';
+    try{ await matchExisting(rows); }
+    catch(e){ prev.disabled=false; prev.textContent='Разобрать';
+      return box.innerHTML=`<p class="note" style="color:var(--danger)">${esc(e.message)}</p>`; }
+    prev.disabled=false; prev.textContent='Разобрать';
     const noPh=rows.filter(r=>!r.phone).length;
     const badPh=rows.filter(r=>!r.phone && r.raw).length;
     const gisS=rows.filter(r=>r.gisSearch).length;
@@ -1092,27 +1147,39 @@ function bind(){
     if(badPh) warn.push(`телефон не распознан: ${badPh}`);
     if(noPh-badPh) warn.push(`без телефона: ${noPh-badPh}`);
     if(gisS) warn.push(`ссылок 2ГИС на поиск вместо карточки: ${gisS} — не возьму`);
+    const nNew=rows.filter(r=>r.action==='new').length;
+    const nUpd=rows.filter(r=>r.action==='update').length;
+    const nSame=rows.filter(r=>r.action==='same').length;
     const LBL={name:'Название',seg:'Сегмент',ph:'Телефон',ig:'Instagram',gis:'2ГИС',note:'Заметка'};
     const mapLines=Object.entries(map).filter(([,i])=>i>=0)
       .map(([k,i])=>`${LBL[k]} ← «${esc(cols[i])}»`);
     const toNote=cols.filter((c,i)=>c && !Object.values(map).includes(i));
-    box.innerHTML=`<p class="note">Нашёл ${rows.length} строк. Дубли по названию пропущу.</p>
+    box.innerHTML=`<p class="note">Нашёл ${rows.length} строк. Сверил с базой по названию.</p>
       <div class="card" style="margin:10px 0"><h3>Как разложил колонки</h3>
         <p class="note" style="margin:0;color:var(--text)">${mapLines.join('<br>')}</p>
         ${toNote.length?`<p class="note" style="margin:8px 0 0">В заметку: ${
           toNote.map(esc).join(', ')}</p>`:''}
       </div>
       ${warn.length?`<p class="note" style="color:var(--warn)">▸ ${warn.join('<br>▸ ')}</p>`:''}
-      <button class="btn" id="imp">Загрузить ${rows.length} в CRM</button>
-      <p class="note" style="margin-top:14px">Что попадёт в базу:</p>
+      <div class="stats" style="margin:12px 0 4px">
+        <div class="stat ${nNew?'go':''}"><b>${nNew}</b><span>новых</span></div>
+        <div class="stat"><b>${nUpd}</b><span>дозаполню</span></div>
+        <div class="stat"><b>${nSame}</b><span>без изменений</span></div>
+        <div class="stat"><b>0</b><span>дублей не создам</span></div>
+      </div>
+      <button class="btn" id="imp" ${nNew+nUpd?'':'disabled'}>${
+        nNew+nUpd ? `Применить: ${nNew} новых, ${nUpd} дозаполнить` : 'Менять нечего'}</button>
+      <p class="note" style="margin-top:14px">Существующие записи только дозаполняются.
+      Что уже заполнено в CRM — не перезаписываю.</p>
       <div style="overflow:auto;margin:8px 0"><table class="tbl">
-      <tr><th>Компания</th><th>Телефон</th><th>Точек</th></tr>
-      ${rows.slice(0,10).map(r=>`<tr><td>${esc(r.name)}</td>
+      <tr><th>Компания</th><th>Телефон</th><th>Что будет</th></tr>
+      ${rows.slice(0,12).map(r=>`<tr><td>${esc(r.name)}</td>
         <td style="color:${r.phone?'var(--accent)':(r.raw?'var(--danger)':'var(--dim)')}">${
           esc(r.phone?fmtPhone(r.phone):(r.raw||'—'))}</td>
-        <td>${r.outlets_count??''}</td></tr>`).join('')}
+        <td style="color:${r.action==='new'?'var(--accent)':r.action==='update'?'var(--warn)':'var(--dim)'}">${
+          r.action==='new'?'новый':r.action==='update'?'+'+r.fills.join(', '):'уже есть'}</td></tr>`).join('')}
       </table></div>
-      ${rows.length>10?`<p class="note">…и ещё ${rows.length-10}</p>`:''}`;
+      ${rows.length>12?`<p class="note">…и ещё ${rows.length-12}</p>`:''}`;
     document.getElementById('imp').onclick=()=>runImport(rows);
   };
 }
