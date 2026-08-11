@@ -910,9 +910,20 @@ function parsePaste(txt){
   const split=l=>l.includes('\t')?l.split('\t'):l.split(';');
   const headRaw=split(lines[0]).map(h=>h.trim());
   const head=headRaw.map(h=>h.toLowerCase());
-  const find=(...names)=>head.findIndex(h=>names.some(n=>h.includes(n)));
-  const ix={ name:find('компан','название'), seg:find('сегмент'), ph:find('телефон','тел'),
-             ig:find('instagram','инстаг'), gis:find('2гис','гис'), note:find('заметк','коммент') };
+  // Ищем по словам заголовка, а не по любой подстроке: иначе «Отель» попадёт
+  // в телефон (содержит «тел»), а «Логистика» — в 2ГИС (содержит «гис»).
+  const words=h=>h.split(/[^0-9a-zа-яё]+/i).filter(Boolean);
+  const find=(...names)=>{
+    let i=head.findIndex(h=>names.includes(h));
+    if(i>=0) return i;
+    return head.findIndex(h=>words(h).some(w=>names.some(n=>w===n||w.startsWith(n))));
+  };
+  const ix={ name:find('компан','название','заведение','фирм','company','name'),
+             seg:find('сегмент','ниша','рубрик','категор','segment'),
+             ph:find('телефон','тел','номер','phone'),
+             ig:find('instagram','инстаг','insta'),
+             gis:find('2гис','гис','2gis'),
+             note:find('заметк','коммент','примеч','описан','note') };
   if(ix.name<0) return {rows:[],err:'Не нашёл колонку «Компания» в первой строке'};
   const mapped=new Set(Object.values(ix).filter(i=>i>=0));
 
@@ -936,13 +947,26 @@ function parsePaste(txt){
     if(nm.toLowerCase()===head[ix.name]){ skipped.header++; continue; }
 
     const raw=ix.ph>=0?(c[ix.ph]||'').trim():'';
+    // В одной ячейке может быть несколько номеров или добавочный.
+    // Берём первый разобранный, остальное не теряем — уйдёт в заметку.
+    let ph1=phone(raw), phRest='';
+    if(!ph1 && raw){
+      const parts=raw.split(/[\/,;|]|\sи\s/).map(x=>x.trim()).filter(Boolean);
+      for(const part of parts){
+        const t=phone(part);
+        if(t && !ph1) ph1=t;
+        else if(part && ph1) phRest += (phRest?', ':'') + part;
+      }
+    }
     let ig=ix.ig>=0?(c[ix.ig]||'').trim():'';
-    if(ig && !ig.includes('instagram.com')) ig='';
+    let igBad='';
+    if(ig && !ig.includes('instagram.com')){ igBad=ig; ig=''; }
 
     // Ссылки 2ГИС берём только на карточку фирмы: /search/ открывает поиск, а не заведение
     let gis=ix.gis>=0?(c[ix.gis]||'').trim():'';
     const gisSearch = !!gis && !/\/firm\//.test(gis);
-    if(gisSearch) gis='';
+    let gisBad='';
+    if(gisSearch){ gisBad=gis; gis=''; }
 
     // Всё, что не разложено по полям, дописываем в заметку, чтобы ничего не потерять
     let note=ix.note>=0?(c[ix.note]||'').trim():'';
@@ -952,13 +976,18 @@ function parsePaste(txt){
       const v=(c[i]||'').trim();
       if(v && headRaw[i]) tail.push(`${headRaw[i]}: ${v}`);
     }
+    // Всё, что не приняли в поле, всё равно сохраняем — пусть лежит в заметке
+    if(igBad)  tail.unshift(`${headRaw[ix.ig]}: ${igBad}`);
+    if(gisBad) tail.unshift(`${headRaw[ix.gis]}: ${gisBad}`);
+    if(phRest) tail.unshift(`Ещё телефон: ${phRest}`);
     if(tail.length) note = (note?note+'\n':'') + tail.join('. ');
 
     rows.push({ name:nm, segment:ix.seg>=0?(c[ix.seg]||'').trim()||null:null,
-      raw, phone:phone(raw), instagram_url:ig||null, gis_url:gis||null,
+      raw, phone:ph1, instagram_url:ig||null, gis_url:gis||null,
       outlets_count:outlets(note), gisSearch, note:note||null });
   }
-  return {rows, skipped, err:rows.length?null:'Ни одной строки с названием'};
+  return {rows, skipped, map:ix, cols:headRaw,
+          err:rows.length?null:'Ни одной строки с названием'};
 }
 
 async function runImport(rows){
@@ -976,13 +1005,16 @@ async function runImport(rows){
         created_by:S.prof.id })}))[0];
       if(r.phone) await db('contacts',{method:'POST',prefer:'return=minimal',
         body:JSON.stringify({company_id:c.id, phone_e164:r.phone, phone_raw:r.raw, is_primary:true})});
+      // Ответственного не ставим: загруженные пачкой лиды идут в общий пул,
+      // менеджер забирает их себе сам. Иначе они осели бы на админе и
+      // не попали бы менеджеру ни в «Мои», ни в «Сегодня».
       await db('leads',{method:'POST',prefer:'return=minimal',
-        body:JSON.stringify({company_id:c.id, status:'new', owner_id:S.prof.id})});
+        body:JSON.stringify({company_id:c.id, status:'new'})});
       ok++;
     }catch{ fail++; }
   }
   toast(`Добавлено ${ok}${skip?`, пропущено дублей ${skip}`:''}${fail?`, ошибок ${fail}`:''}`, fail>0);
-  S.view='list'; S.filter='all'; go('list');
+  S.view='list'; S.filter='all'; S.own = ok ? 'none' : 'all'; go('list');
 }
 
 /* ── НАВИГАЦИЯ ── */
@@ -1049,7 +1081,7 @@ function bind(){
 
   const prev=document.getElementById('prev');
   if(prev) prev.onclick=()=>{
-    const {rows,err,skipped:sk={}}=parsePaste(document.getElementById('paste').value);
+    const {rows,err,skipped:sk={},map={},cols=[]}=parsePaste(document.getElementById('paste').value);
     const box=document.getElementById('out');
     if(err) return box.innerHTML=`<p class="note" style="color:var(--danger)">${esc(err)}</p>`;
     const noPh=rows.filter(r=>!r.phone).length;
@@ -1060,16 +1092,27 @@ function bind(){
     if(badPh) warn.push(`телефон не распознан: ${badPh}`);
     if(noPh-badPh) warn.push(`без телефона: ${noPh-badPh}`);
     if(gisS) warn.push(`ссылок 2ГИС на поиск вместо карточки: ${gisS} — не возьму`);
+    const LBL={name:'Название',seg:'Сегмент',ph:'Телефон',ig:'Instagram',gis:'2ГИС',note:'Заметка'};
+    const mapLines=Object.entries(map).filter(([,i])=>i>=0)
+      .map(([k,i])=>`${LBL[k]} ← «${esc(cols[i])}»`);
+    const toNote=cols.filter((c,i)=>c && !Object.values(map).includes(i));
     box.innerHTML=`<p class="note">Нашёл ${rows.length} строк. Дубли по названию пропущу.</p>
+      <div class="card" style="margin:10px 0"><h3>Как разложил колонки</h3>
+        <p class="note" style="margin:0;color:var(--text)">${mapLines.join('<br>')}</p>
+        ${toNote.length?`<p class="note" style="margin:8px 0 0">В заметку: ${
+          toNote.map(esc).join(', ')}</p>`:''}
+      </div>
       ${warn.length?`<p class="note" style="color:var(--warn)">▸ ${warn.join('<br>▸ ')}</p>`:''}
-      <div style="overflow:auto;margin:10px 0"><table class="tbl">
+      <button class="btn" id="imp">Загрузить ${rows.length} в CRM</button>
+      <p class="note" style="margin-top:14px">Что попадёт в базу:</p>
+      <div style="overflow:auto;margin:8px 0"><table class="tbl">
       <tr><th>Компания</th><th>Телефон</th><th>Точек</th></tr>
-      ${rows.map(r=>`<tr><td>${esc(r.name)}</td>
+      ${rows.slice(0,10).map(r=>`<tr><td>${esc(r.name)}</td>
         <td style="color:${r.phone?'var(--accent)':(r.raw?'var(--danger)':'var(--dim)')}">${
           esc(r.phone?fmtPhone(r.phone):(r.raw||'—'))}</td>
         <td>${r.outlets_count??''}</td></tr>`).join('')}
       </table></div>
-      <button class="btn" id="imp">Загрузить ${rows.length} в CRM</button>`;
+      ${rows.length>10?`<p class="note">…и ещё ${rows.length-10}</p>`:''}`;
     document.getElementById('imp').onclick=()=>runImport(rows);
   };
 }
