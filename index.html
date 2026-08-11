@@ -893,8 +893,10 @@ function importScreen(){
   return `<div class="topbar"><button class="back" data-back>‹</button>
     <h1>Загрузка из таблицы<span class="sub">только для администратора</span></h1></div>
   <div class="wrap">
-    <p class="note" style="margin:0 0 12px">Выдели строки в своей таблице, скопируй и вставь сюда.
-    Первая строка — заголовки. Понимаю колонки: Компания, Сегмент, Телефон, Instagram, 2ГИС, Заметка.</p>
+    <p class="note" style="margin:0 0 12px">Выдели строки в своей таблице вместе с заголовками,
+    скопируй и вставь сюда. Раскладываю по полям: Компания, Сегмент, Телефон, Instagram, 2ГИС, Заметка.
+    Остальные колонки дописываю в заметку, чтобы ничего не потерялось. Число точек вытаскиваю
+    из заметки, если оно там названо.</p>
     <textarea id="paste" style="min-height:150px;font-family:var(--mono);font-size:13px"
       placeholder="Компания	Сегмент	Телефон	Instagram	2ГИС	Заметка"></textarea>
     <button class="btn ghost" id="prev">Разобрать</button>
@@ -906,25 +908,57 @@ function parsePaste(txt){
   const lines=txt.trim().split(/\r?\n/).filter(l=>l.trim());
   if(!lines.length) return {rows:[],err:'Пусто'};
   const split=l=>l.includes('\t')?l.split('\t'):l.split(';');
-  const head=split(lines[0]).map(h=>h.trim().toLowerCase());
+  const headRaw=split(lines[0]).map(h=>h.trim());
+  const head=headRaw.map(h=>h.toLowerCase());
   const find=(...names)=>head.findIndex(h=>names.some(n=>h.includes(n)));
   const ix={ name:find('компан','название'), seg:find('сегмент'), ph:find('телефон','тел'),
              ig:find('instagram','инстаг'), gis:find('2гис','гис'), note:find('заметк','коммент') };
   if(ix.name<0) return {rows:[],err:'Не нашёл колонку «Компания» в первой строке'};
-  const rows=[];
+  const mapped=new Set(Object.values(ix).filter(i=>i>=0));
+
+  // Число точек из заметки: «11 филиалов», «Минимум 3 точки», «Две точки»
+  const WORDS={два:2,две:2,три:3,четыре:4,пять:5,шесть:6,семь:7,восемь:8,девять:9,десять:10};
+  function outlets(note){
+    if(!note) return null;
+    const t=note.toLowerCase();
+    let m=t.match(/(\d+)\s*(филиал|точк|точе|отдел)/);
+    if(m) return +m[1];
+    m=t.match(/(два|две|три|четыре|пять|шесть|семь|восемь|девять|десять)\s*(филиал|точк|точе)/);
+    return m?WORDS[m[1]]:null;
+  }
+
+  const rows=[], skipped={header:0, empty:0};
   for(const line of lines.slice(1)){
     const c=split(line);
     const nm=(c[ix.name]||'').trim();
-    if(!nm) continue;
+    if(!nm){ skipped.empty++; continue; }
+    // Повторная строка заголовков посреди таблицы
+    if(nm.toLowerCase()===head[ix.name]){ skipped.header++; continue; }
+
     const raw=ix.ph>=0?(c[ix.ph]||'').trim():'';
     let ig=ix.ig>=0?(c[ix.ig]||'').trim():'';
     if(ig && !ig.includes('instagram.com')) ig='';
+
+    // Ссылки 2ГИС берём только на карточку фирмы: /search/ открывает поиск, а не заведение
+    let gis=ix.gis>=0?(c[ix.gis]||'').trim():'';
+    const gisSearch = !!gis && !/\/firm\//.test(gis);
+    if(gisSearch) gis='';
+
+    // Всё, что не разложено по полям, дописываем в заметку, чтобы ничего не потерять
+    let note=ix.note>=0?(c[ix.note]||'').trim():'';
+    const tail=[];
+    for(let i=0;i<headRaw.length;i++){
+      if(mapped.has(i)) continue;
+      const v=(c[i]||'').trim();
+      if(v && headRaw[i]) tail.push(`${headRaw[i]}: ${v}`);
+    }
+    if(tail.length) note = (note?note+'\n':'') + tail.join('. ');
+
     rows.push({ name:nm, segment:ix.seg>=0?(c[ix.seg]||'').trim()||null:null,
-      raw, phone:phone(raw), instagram_url:ig||null,
-      gis_url:ix.gis>=0?(c[ix.gis]||'').trim()||null:null,
-      note:ix.note>=0?(c[ix.note]||'').trim()||null:null });
+      raw, phone:phone(raw), instagram_url:ig||null, gis_url:gis||null,
+      outlets_count:outlets(note), gisSearch, note:note||null });
   }
-  return {rows,err:rows.length?null:'Ни одной строки с названием'};
+  return {rows, skipped, err:rows.length?null:'Ни одной строки с названием'};
 }
 
 async function runImport(rows){
@@ -938,7 +972,8 @@ async function runImport(rows){
       if(ex.length){ skip++; continue; }
       const c=(await db('companies',{method:'POST',body:JSON.stringify({
         name:r.name, segment:r.segment, instagram_url:r.instagram_url,
-        gis_url:r.gis_url, note:r.note, created_by:S.prof.id })}))[0];
+        gis_url:r.gis_url, outlets_count:r.outlets_count, note:r.note,
+        created_by:S.prof.id })}))[0];
       if(r.phone) await db('contacts',{method:'POST',prefer:'return=minimal',
         body:JSON.stringify({company_id:c.id, phone_e164:r.phone, phone_raw:r.raw, is_primary:true})});
       await db('leads',{method:'POST',prefer:'return=minimal',
@@ -1014,19 +1049,26 @@ function bind(){
 
   const prev=document.getElementById('prev');
   if(prev) prev.onclick=()=>{
-    const {rows,err}=parsePaste(document.getElementById('paste').value);
+    const {rows,err,skipped:sk={}}=parsePaste(document.getElementById('paste').value);
     const box=document.getElementById('out');
     if(err) return box.innerHTML=`<p class="note" style="color:var(--danger)">${esc(err)}</p>`;
-    const bad=rows.filter(r=>!r.phone).length;
-    box.innerHTML=`<p class="note">Нашёл ${rows.length} строк${
-      bad?`, из них без распознанного телефона — ${bad}`:''}. Дубли по названию пропущу.</p>
+    const noPh=rows.filter(r=>!r.phone).length;
+    const badPh=rows.filter(r=>!r.phone && r.raw).length;
+    const gisS=rows.filter(r=>r.gisSearch).length;
+    const warn=[];
+    if(sk.header) warn.push(`пропущено повторных строк заголовков: ${sk.header}`);
+    if(badPh) warn.push(`телефон не распознан: ${badPh}`);
+    if(noPh-badPh) warn.push(`без телефона: ${noPh-badPh}`);
+    if(gisS) warn.push(`ссылок 2ГИС на поиск вместо карточки: ${gisS} — не возьму`);
+    box.innerHTML=`<p class="note">Нашёл ${rows.length} строк. Дубли по названию пропущу.</p>
+      ${warn.length?`<p class="note" style="color:var(--warn)">▸ ${warn.join('<br>▸ ')}</p>`:''}
       <div style="overflow:auto;margin:10px 0"><table class="tbl">
-      <tr><th>Компания</th><th>Сегмент</th><th>Телефон</th></tr>
-      ${rows.slice(0,12).map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.segment||'')}</td>
-        <td style="color:${r.phone?'var(--accent)':'var(--danger)'}">${
-          esc(r.phone||r.raw||'—')}</td></tr>`).join('')}
+      <tr><th>Компания</th><th>Телефон</th><th>Точек</th></tr>
+      ${rows.map(r=>`<tr><td>${esc(r.name)}</td>
+        <td style="color:${r.phone?'var(--accent)':(r.raw?'var(--danger)':'var(--dim)')}">${
+          esc(r.phone?fmtPhone(r.phone):(r.raw||'—'))}</td>
+        <td>${r.outlets_count??''}</td></tr>`).join('')}
       </table></div>
-      ${rows.length>12?`<p class="note">…и ещё ${rows.length-12}</p>`:''}
       <button class="btn" id="imp">Загрузить ${rows.length} в CRM</button>`;
     document.getElementById('imp').onclick=()=>runImport(rows);
   };
