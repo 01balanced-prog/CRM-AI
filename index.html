@@ -528,7 +528,7 @@ function leadScreen(){
     <a class="act" ${l.instagram_url?`href="${esc(l.instagram_url)}" target="_blank" rel="noopener"`:'disabled'}>
       <span class="ic">${IC.cam}</span>Instagram</a>
     <a class="act" ${l.gis_url?`href="${esc(l.gis_url)}" target="_blank" rel="noopener"`:'disabled'}>
-      <span class="ic">${IC.pin}</span>2ГИС</a>
+      <span class="ic">${IC.pin}</span>${l.gis_url && !/\/firm\//.test(l.gis_url) ? '2ГИС поиск' : '2ГИС'}</a>
   </div>`;
 
   const kv=(k,v,num)=>v==null||v===''?'':`<div class="kv"><dt>${k}</dt><dd class="${num?'num':''}">${v}</dd></div>`;
@@ -963,10 +963,11 @@ function parsePaste(txt){
     if(ig && !ig.includes('instagram.com')){ igBad=ig; ig=''; }
 
     // Ссылки 2ГИС берём только на карточку фирмы: /search/ открывает поиск, а не заведение
+    // Ссылку 2ГИС берём любую. Если это поиск, а не карточка фирмы —
+    // помечаем, чтобы менеджер не удивился, куда его отправили.
     let gis=ix.gis>=0?(c[ix.gis]||'').trim():'';
+    if(gis && !/^https?:\/\//i.test(gis)) gis='';
     const gisSearch = !!gis && !/\/firm\//.test(gis);
-    let gisBad='';
-    if(gisSearch){ gisBad=gis; gis=''; }
 
     // Всё, что не разложено по полям, дописываем в заметку, чтобы ничего не потерять
     let note=ix.note>=0?(c[ix.note]||'').trim():'';
@@ -978,7 +979,6 @@ function parsePaste(txt){
     }
     // Всё, что не приняли в поле, всё равно сохраняем — пусть лежит в заметке
     if(igBad)  tail.unshift(`${headRaw[ix.ig]}: ${igBad}`);
-    if(gisBad) tail.unshift(`${headRaw[ix.gis]}: ${gisBad}`);
     if(phRest) tail.unshift(`Ещё телефон: ${phRest}`);
     if(tail.length) note = (note?note+'\n':'') + tail.join('. ');
 
@@ -1146,7 +1146,7 @@ function bind(){
     if(sk.header) warn.push(`пропущено повторных строк заголовков: ${sk.header}`);
     if(badPh) warn.push(`телефон не распознан: ${badPh}`);
     if(noPh-badPh) warn.push(`без телефона: ${noPh-badPh}`);
-    if(gisS) warn.push(`ссылок 2ГИС на поиск вместо карточки: ${gisS} — не возьму`);
+    if(gisS) warn.push(`ссылок 2ГИС ведут на поиск, а не на карточку фирмы: ${gisS} — возьму, но кнопка откроет поиск`);
     const nNew=rows.filter(r=>r.action==='new').length;
     const nUpd=rows.filter(r=>r.action==='update').length;
     const nSame=rows.filter(r=>r.action==='same').length;
@@ -1172,10 +1172,13 @@ function bind(){
       <p class="note" style="margin-top:14px">Существующие записи только дозаполняются.
       Что уже заполнено в CRM — не перезаписываю.</p>
       <div style="overflow:auto;margin:8px 0"><table class="tbl">
-      <tr><th>Компания</th><th>Телефон</th><th>Что будет</th></tr>
+      <tr><th>Компания</th><th>Телефон</th><th>IG</th><th>2ГИС</th><th>Что будет</th></tr>
       ${rows.slice(0,12).map(r=>`<tr><td>${esc(r.name)}</td>
         <td style="color:${r.phone?'var(--accent)':(r.raw?'var(--danger)':'var(--dim)')}">${
           esc(r.phone?fmtPhone(r.phone):(r.raw||'—'))}</td>
+        <td style="color:${r.instagram_url?'var(--accent)':'var(--dim)'}">${r.instagram_url?'✓':'—'}</td>
+        <td style="color:${r.gis_url?(r.gisSearch?'var(--warn)':'var(--accent)'):'var(--dim)'}">${
+          r.gis_url?(r.gisSearch?'поиск':'✓'):'—'}</td>
         <td style="color:${r.action==='new'?'var(--accent)':r.action==='update'?'var(--warn)':'var(--dim)'}">${
           r.action==='new'?'новый':r.action==='update'?'+'+r.fills.join(', '):'уже есть'}</td></tr>`).join('')}
       </table></div>
