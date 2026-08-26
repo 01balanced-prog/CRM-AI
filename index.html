@@ -49,12 +49,12 @@ a{color:var(--accent);text-decoration:none}
 /* ============ НИЗ ============ */
 .nav{
   position:fixed;left:0;right:0;bottom:0;z-index:30;display:grid;
-  grid-template-columns:repeat(4,1fr);background:rgba(8,8,8,.94);
+  grid-template-columns:repeat(5,1fr);background:rgba(8,8,8,.94);
   backdrop-filter:blur(12px);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom);
 }
 .nav button{padding:9px 0 10px;display:flex;flex-direction:column;align-items:center;
-  gap:3px;color:var(--dim);font-size:11px;letter-spacing:.01em}
+  gap:3px;color:var(--dim);font-size:10.5px;letter-spacing:0}
 .nav button .ic{font-size:20px;line-height:1}
 .nav button.on{color:var(--accent)}
 .nav .badge{position:absolute;transform:translate(14px,-6px);background:var(--danger);
@@ -198,6 +198,10 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .tbl th{color:var(--muted);font-weight:600;background:var(--raised)}
 .note{font-size:13px;color:var(--dim);margin-top:8px;line-height:1.5}
 
+/* ============ ОТЧЁТ ============ */
+#rep{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--ink)}
+#rep svg{display:block;width:100%;height:auto}
+
 /* ============ ВХОД ============ */
 .login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px}
 .logo{font-size:30px;font-weight:750;letter-spacing:-.035em;margin-bottom:4px}
@@ -242,7 +246,8 @@ const IC = {
 };
 
 const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
-            data:[], stats:null, log:[], filter:'all', own:'mine', q:'', busy:false };
+            data:[], stats:null, log:[], filter:'all', own:'mine', q:'',
+            busy:false, back:[], report:null, period:'today', repWho:'all' };
 
 /* ─────────── СЕТЬ ─────────── */
 const LS = { get:k=>{try{return JSON.parse(localStorage.getItem(k))}catch{return null}},
@@ -357,6 +362,8 @@ async function load(){
   if(S.view==='today'){
     S.data = await db('v_today?select=*');
     S.stats = (await db('v_stats?select=*'))[0];
+  } else if(S.view==='report'){
+    await loadReport();
   } else if(S.view==='list'){
     let f='';
     if(S.filter==='open') f = `&status=in.(${OPEN_ST.join(',')})`;
@@ -368,7 +375,24 @@ async function load(){
   }
 }
 
-async function openLead(id){
+// Экраны lead/add/imp — вложенные: с них возвращаемся туда, откуда пришли.
+// Тот же стек обслуживает и системный жест «назад».
+function pushScreen(){
+  S.back.push({view:S.view, leadId:S.lead?.id, filter:S.filter, own:S.own, q:S.q});
+  try{ history.pushState({depth:S.back.length}, ''); }catch{}
+}
+
+async function popScreen(){
+  const prev=S.back.pop();
+  if(!prev) return go('today');
+  S.editing=null;
+  if(prev.view==='lead' && prev.leadId) return openLead(prev.leadId, false);
+  S.filter=prev.filter; S.own=prev.own; S.q=prev.q;
+  return go(prev.view, false);
+}
+
+async function openLead(id, push=true){
+  if(push && S.view!=='lead') pushScreen();
   S.busy=true; render();
   try{
     S.lead = (await db(`v_leads?id=eq.${id}&select=*`))[0];
@@ -378,7 +402,10 @@ async function openLead(id){
   S.busy=false; render();
 }
 
-async function go(v){
+async function go(v, push=true){
+  // Переход на любую основную вкладку сбрасывает стек: возвращаться некуда
+  if(['today','list','more'].includes(v)) S.back.length=0;
+  else if(push && v!==S.view) pushScreen();
   S.view=v; S.busy=true; render();
   try{ await load(); }catch(e){ toast(e.message,true); }
   S.busy=false; render();
@@ -390,8 +417,8 @@ function render(){
   if(SUPABASE_URL.startsWith('ВСТАВЬ')) return app.innerHTML = setupScreen();
   if(!S.user) return app.innerHTML = loginScreen(), bindLogin();
   if(!S.prof) return app.innerHTML = noAccessScreen(), bindNoAccess();
-  const v = { today:todayScreen, list:listScreen, lead:leadScreen,
-              add:addScreen, more:moreScreen, imp:importScreen }[S.view] || todayScreen;
+  const v = { today:todayScreen, list:listScreen, lead:leadScreen, add:addScreen,
+              more:moreScreen, imp:importScreen, report:reportScreen }[S.view] || todayScreen;
   app.innerHTML = v() + navBar();
   bind();
 }
@@ -628,6 +655,9 @@ function touchSheet(){
     <div class="chips" id="oc">${['answered','no_answer','callback','sent','refused'].map((k,i)=>
       `<button class="chip ${i===0?'on':''}" data-v="${k}">${OUT[k]}</button>`).join('')}</div>
 
+    <label class="check" style="margin-top:14px"><input type="checkbox" id="wdm">
+      Говорил с ЛПР${l.dm_name?` — ${esc(l.dm_name)}`:''}</label>
+
     <label for="cm">Комментарий</label>
     <textarea id="cm" placeholder="Что сказали. Можно надиктовать голосом"></textarea>
 
@@ -706,10 +736,11 @@ function touchSheet(){
     try{
       await db('activities', { method:'POST', prefer:'return=minimal', body:JSON.stringify({
         lead_id:S.lead.id, author_id:S.prof.id, channel:gv('ch'), outcome:gv('oc'),
+        with_dm:d.querySelector('#wdm').checked,
         comment:d.querySelector('#cm').value.trim()||null }) });
       await db(`leads?id=eq.${S.lead.id}`, { method:'PATCH', prefer:'return=minimal',
         body:JSON.stringify(patch) });
-      d.remove(); toast('Записано'); await openLead(S.lead.id);
+      d.remove(); toast('Записано'); await openLead(S.lead.id, false);
     }catch(e){ toast(e.message,true); btn.disabled=false; btn.textContent='Сохранить'; }
   };
 }
@@ -825,7 +856,7 @@ async function saveLead(){
           {company_id:S.editing.company_id, phone_e164:ph, phone_raw:g('f_phone'), is_primary:true})});
       }
       await saveDm(S.editing.company_id, ph || S.editing.primary_phone);
-      const id=S.editing.id; S.editing=null; toast('Сохранено'); await openLead(id);
+      const id=S.editing.id; S.editing=null; toast('Сохранено'); await openLead(id, false);
     }else{
       const c=(await db('companies',{method:'POST',body:JSON.stringify(co)}))[0];
       if(ph) await db('contacts',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
@@ -1067,6 +1098,213 @@ async function runImport(rows){
   S.view='list'; S.filter='all'; S.own = added ? 'none' : 'all'; go('list');
 }
 
+
+/* ══════════ ОТЧЁТ ══════════ */
+
+function periodRange(kind){
+  const now=new Date();
+  const start=new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if(kind==='week') start.setDate(start.getDate()-6);
+  if(kind==='month') start.setDate(start.getDate()-29);
+  const end=new Date(now.getFullYear(), now.getMonth(), now.getDate()+1);
+  return {from:start.toISOString(), to:end.toISOString(), start, kind};
+}
+
+async function loadReport(){
+  const {from,to,kind}=periodRange(S.period);
+  const [acts, leads] = await Promise.all([
+    db(`activities?created_at=gte.${from}&created_at=lt.${to}&select=*&order=created_at`),
+    db('v_leads?select=*')
+  ]);
+  const byLead=new Map(leads.map(l=>[l.id,l]));
+  const who=S.repWho;
+  const mine=a=>who==='all' || a.author_id===who;
+  const leadMine=l=>who==='all' || l.owner_id===who;
+
+  const touches=acts.filter(a=>a.channel!=='system' && mine(a));
+  const sys=acts.filter(a=>a.channel==='system' && mine(a));
+
+  const cnt=(arr,f)=>arr.filter(f).length;
+  const chan=k=>cnt(touches,a=>a.channel===k);
+
+  // Движение по воронке считаем по системным записям смены статуса
+  const moved=t=>cnt(sys,a=>a.status_to===t);
+
+  const closedIn=st=>leads.filter(l=>l.status===st && leadMine(l) &&
+    sys.some(a=>a.lead_id===l.id && a.status_to===st));
+  const won=closedIn('won'), lost=closedIn('lost');
+
+  const dmTouch=cnt(touches,a=>a.with_dm);
+  const dmLeads=new Set(touches.filter(a=>a.with_dm).map(a=>a.lead_id)).size;
+  const answered=cnt(touches,a=>a.outcome==='answered');
+  const attempts=cnt(touches,a=>a.outcome==='answered'||a.outcome==='no_answer');
+
+  const lostBy={};
+  lost.forEach(l=>{ if(l.lost_reason) lostBy[l.lost_reason]=(lostBy[l.lost_reason]||0)+1; });
+
+  S.report={
+    kind, start:periodRange(S.period).start,
+    who: who==='all' ? 'вся команда' : (S.staff.find(u=>u.id===who)?.name || S.prof.name),
+    touches:touches.length,
+    answered, attempts,
+    rate: attempts ? Math.round(answered/attempts*100) : null,
+    call:chan('call'), wa:chan('whatsapp'), ig:chan('instagram'), meet:chan('meeting'),
+    contacted:moved('contacted'), brief:moved('brief_done'),
+    proposal:moved('proposal_sent'), nego:moved('negotiation'),
+    won:won.length, lost:lost.length,
+    setupSum:won.reduce((s,l)=>s+(l.setup_amount||0),0),
+    mrrSum:won.reduce((s,l)=>s+(l.mrr_amount||0),0),
+    dmTouch, dmLeads, lostBy,
+    pipeline:leads.filter(l=>leadMine(l)&&['proposal_sent','negotiation'].includes(l.status))
+                  .reduce((s,l)=>s+(l.mrr_amount||0),0)
+  };
+}
+
+function reportSVG(r){
+  const W=760;
+  const T={ink:'#080808',card:'#141414',line:'#262626',txt:'#F2F2F2',mut:'#8A8A8A',
+           dim:'#5C5C5C',acc:'#00E676',warn:'#FFB020',bad:'#FF5252'};
+  const F='-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif';
+  const M='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+  const e=t=>String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const nf=n=>new Intl.NumberFormat('ru-RU').format(n||0);
+  const per={today:'за сегодня',week:'за 7 дней',month:'за 30 дней'}[r.kind];
+  const dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
+
+  let y=0; const p=[];
+  const box=(x,yy,w,h,fill)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="14" fill="${fill||T.card}" stroke="${T.line}"/>`);
+  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c||T.txt}" font-family="${o.m?M:F}" font-size="${o.s||16}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
+
+  // шапка
+  p.push(`<rect x="0" y="0" width="${W}" height="112" fill="${T.ink}"/>`);
+  p.push(`<rect x="0" y="108" width="${W}" height="4" fill="${T.acc}"/>`);
+  tx(32,52,'balance',{s:30,w:700});
+  p.push(`<circle cx="150" cy="46" r="5" fill="${T.acc}"/>`);
+  tx(32,82,`Отчёт ${per} · ${r.who}`,{s:15,c:T.mut});
+  tx(W-32,52,dt,{s:15,c:T.mut,a:'end'});
+  y=144;
+
+  // три главных числа
+  const big=[[r.touches,'касаний',T.acc],
+             [r.rate==null?'—':r.rate+'%','дозвон',r.rate>=40?T.acc:T.warn],
+             [r.dmLeads,'вышли на ЛПР',T.txt]];
+  const bw=(W-64-24)/3;
+  big.forEach(([v,l,c],i)=>{
+    const x=32+i*(bw+12);
+    box(x,y,bw,104);
+    tx(x+bw/2,y+56,v,{s:38,w:600,c,a:'middle',m:true});
+    tx(x+bw/2,y+82,l,{s:14,c:T.mut,a:'middle'});
+  });
+  y+=124;
+
+  // каналы
+  const ch=[['Звонки',r.call],['WhatsApp',r.wa],['Instagram',r.ig],['Встречи',r.meet]];
+  const max=Math.max(1,...ch.map(c=>c[1]));
+  const chH=52+ch.length*34;
+  box(32,y,W-64,chH);
+  tx(56,y+32,'КАНАЛЫ',{s:12,w:600,c:T.mut,ls:'1.4'});
+  ch.forEach(([l,v],i)=>{
+    const yy=y+62+i*34;
+    tx(56,yy,l,{s:15,c:T.txt});
+    const bx=210, bw2=W-64-210-70;
+    p.push(`<rect x="${bx}" y="${yy-13}" width="${bw2}" height="16" rx="8" fill="${T.line}"/>`);
+    if(v) p.push(`<rect x="${bx}" y="${yy-13}" width="${Math.max(16,bw2*v/max)}" height="16" rx="8" fill="${T.acc}"/>`);
+    tx(W-56,yy,v,{s:15,m:true,a:'end',c:v?T.txt:T.dim});
+  });
+  y+=chH+16;
+
+  // воронка
+  const fn=[['Контакт установлен',r.contacted],['Бриф снят',r.brief],
+            ['КП отправлено',r.proposal],['На согласовании',r.nego],
+            ['Продано',r.won],['Отказ',r.lost]];
+  const fH=52+Math.ceil(fn.length/2)*38;
+  box(32,y,W-64,fH);
+  tx(56,y+32,'ДВИЖЕНИЕ ПО ВОРОНКЕ',{s:12,w:600,c:T.mut,ls:'1.4'});
+  fn.forEach(([l,v],i)=>{
+    const col=i%2, row=Math.floor(i/2);
+    const x=56+col*((W-112)/2), yy=y+66+row*38;
+    tx(x,yy,l,{s:15,c:T.mut});
+    const c = l==='Продано'&&v ? T.acc : l==='Отказ'&&v ? T.bad : T.txt;
+    tx(x+(W-112)/2-24,yy,v,{s:18,w:600,m:true,a:'end',c:v?c:T.dim});
+  });
+  y+=fH+16;
+
+  // деньги
+  box(32,y,W-64,116);
+  tx(56,y+32,'ДЕНЬГИ',{s:12,w:600,c:T.mut,ls:'1.4'});
+  const mo=[['Продано, внедрение',nf(r.setupSum)+' ₽',r.setupSum?T.acc:T.dim],
+            ['Продано, подписка',nf(r.mrrSum)+' ₽/мес',r.mrrSum?T.acc:T.dim],
+            ['В работе, подписка',nf(r.pipeline)+' ₽/мес',T.txt]];
+  mo.forEach(([l,v,c],i)=>{
+    const x=56+i*((W-112)/3);
+    tx(x,y+70,l,{s:13,c:T.mut});
+    tx(x,y+96,v,{s:19,w:600,m:true,c});
+  });
+  y+=132;
+
+  // причины отказов
+  const reasons=Object.entries(r.lostBy);
+  if(reasons.length){
+    const rH=52+reasons.length*30;
+    box(32,y,W-64,rH);
+    tx(56,y+32,'ПОЧЕМУ ОТКАЗАЛИ',{s:12,w:600,c:T.mut,ls:'1.4'});
+    reasons.forEach(([k,v],i)=>{
+      const yy=y+62+i*30;
+      tx(56,yy,LOST[k]||k,{s:15,c:T.txt});
+      tx(W-56,yy,v,{s:15,m:true,a:'end',c:T.bad});
+    });
+    y+=rH+16;
+  }
+
+  tx(W/2,y+18,`Разговоров с ЛПР: ${r.dmTouch} · сформировано ${
+    new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`,
+    {s:13,c:T.dim,a:'middle'});
+  y+=44;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}">
+    <rect width="${W}" height="${y}" fill="${T.ink}"/>${p.join('')}</svg>`;
+}
+
+function reportScreen(){
+  const head=`<div class="topbar"><h1>Отчёт<span class="sub">${
+    {today:'за сегодня',week:'за 7 дней',month:'за 30 дней'}[S.period]}</span></h1></div>`;
+  const chips=`<div class="wrap" style="padding-bottom:0">
+    <div class="chips">${[['today','Сегодня'],['week','7 дней'],['month','30 дней']]
+      .map(([k,v])=>`<button class="chip ${S.period===k?'on':''}" data-p="${k}">${v}</button>`).join('')}</div>
+    ${isAdmin()&&S.staff.length>1?`<div class="chips">
+      <button class="chip ${S.repWho==='all'?'on':''}" data-w="all">Вся команда</button>
+      ${S.staff.map(u=>`<button class="chip ${S.repWho===u.id?'on':''}" data-w="${u.id}">${
+        esc(u.name)}</button>`).join('')}</div>`:''}
+  </div>`;
+  if(S.busy||!S.report) return head+chips+`<div class="spin"></div>`;
+  return head+chips+`<div class="wrap" style="padding-top:4px">
+    <div id="rep">${reportSVG(S.report)}</div>
+    <button class="btn" id="save_png">Сохранить картинкой</button>
+    <button class="btn ghost" id="share_png">Отправить</button>
+    <p class="note">Картинка 760 пикселей шириной — читается в мессенджере без открытия.</p>
+  </div>`;
+}
+
+// SVG → PNG прямо в браузере, без сторонних библиотек
+async function reportPNG(scale=2){
+  const svg=reportSVG(S.report);
+  const url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  const img=new Image();
+  await new Promise((ok,no)=>{ img.onload=ok; img.onerror=()=>no(new Error('Не удалось нарисовать')); img.src=url; });
+  const c=document.createElement('canvas');
+  c.width=img.width*scale; c.height=img.height*scale;
+  const g=c.getContext('2d');
+  g.fillStyle='#080808'; g.fillRect(0,0,c.width,c.height);
+  g.drawImage(img,0,0,c.width,c.height);
+  const blob=await new Promise(ok=>c.toBlob(ok,'image/png'));
+  if(!blob) throw new Error('Не удалось собрать картинку');
+  return blob;
+}
+
+function reportName(){
+  return `balance-otchet-${S.period}-${iso(new Date())}.png`;
+}
+
 /* ── НАВИГАЦИЯ ── */
 function navBar(){
   const n=(k,ic,t,b)=>`<button data-nav="${k}" class="${S.view===k?'on':''}">
@@ -1076,6 +1314,7 @@ function navBar(){
     ${n('today','◉','Сегодня',over)}
     ${n('list','☰','Лиды')}
     ${n('add','＋','Добавить')}
+    ${n('report','▤','Отчёт')}
     ${n('more','⋯','Ещё')}
   </nav>`;
 }
@@ -1087,16 +1326,50 @@ function bind(){
   });
   document.querySelectorAll('[data-lead]').forEach(b=>b.onclick=()=>openLead(b.dataset.lead));
   document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>{
-    S.editing=null; go(S.lead && S.view!=='lead' ? 'lead' : 'today');
+    // Через history.back(), чтобы кнопка и жест вели себя одинаково
+    if(S.back.length && history.state?.depth) history.back(); else popScreen();
   });
   document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ S.filter=b.dataset.f; go('list'); });
   document.querySelectorAll('[data-o]').forEach(b=>b.onclick=()=>{ S.own=b.dataset.o; go('list'); });
+  document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{ S.period=b.dataset.p; go('report',false); });
+  document.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{ S.repWho=b.dataset.w; go('report',false); });
+
+  const png=document.getElementById('save_png');
+  if(png) png.onclick=async()=>{
+    png.disabled=true; png.textContent='Рисую…';
+    try{
+      const blob=await reportPNG();
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download=reportName(); a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      toast('Картинка сохранена');
+    }catch(e){ toast(e.message,true); }
+    png.disabled=false; png.textContent='Сохранить картинкой';
+  };
+
+  const shr=document.getElementById('share_png');
+  if(shr) shr.onclick=async()=>{
+    shr.disabled=true; shr.textContent='Готовлю…';
+    try{
+      const blob=await reportPNG();
+      const file=new File([blob], reportName(), {type:'image/png'});
+      if(navigator.canShare?.({files:[file]})){
+        await navigator.share({files:[file], title:'Отчёт Balance'});
+      }else{
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(blob); a.download=reportName(); a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+        toast('Отправка недоступна — сохранил картинку');
+      }
+    }catch(e){ if(e.name!=='AbortError') toast(e.message,true); }
+    shr.disabled=false; shr.textContent='Отправить';
+  };
 
   const take=document.querySelector('[data-take]');
   if(take) take.onclick=async()=>{
     try{ await db(`leads?id=eq.${S.lead.id}`,{method:'PATCH',prefer:'return=minimal',
       body:JSON.stringify({owner_id:S.prof.id})});
-      toast('Лид закреплён за тобой'); await openLead(S.lead.id);
+      toast('Лид закреплён за тобой'); await openLead(S.lead.id, false);
     }catch(e){ toast(e.message,true); }
   };
 
@@ -1105,7 +1378,7 @@ function bind(){
     const v=document.getElementById('own_sel').value||null;
     try{ await db(`leads?id=eq.${S.lead.id}`,{method:'PATCH',prefer:'return=minimal',
       body:JSON.stringify({owner_id:v})});
-      toast(v?'Ответственный изменён':'Лид снят с ответственного'); await openLead(S.lead.id);
+      toast(v?'Ответственный изменён':'Лид снят с ответственного'); await openLead(S.lead.id, false);
     }catch(e){ toast(e.message,true); }
   };
 
@@ -1188,6 +1461,8 @@ function bind(){
 }
 
 /* ─────────── СТАРТ ─────────── */
+window.addEventListener('popstate', ()=>{ if(S.user && S.prof) popScreen(); });
+
 if('serviceWorker' in navigator)
   window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
 boot();
