@@ -143,6 +143,22 @@ a{color:var(--accent);text-decoration:none}
 .dmhead{font-size:12px;font-weight:650;color:var(--accent);text-transform:uppercase;
   letter-spacing:.08em;margin:14px 0 0}
 
+/* ============ КОНТАКТЫ ============ */
+.ct{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
+.ct:last-of-type{border-bottom:0}
+.ct-main{flex:1;min-width:0;text-align:left}
+.ct-main b{display:block;font-size:15.5px;font-weight:650;letter-spacing:-.01em}
+.ct-main span{display:block;font-size:12px;color:var(--muted);margin-top:1px}
+.ct-main i{display:block;font-style:normal;font-family:var(--mono);font-size:14px;
+  color:var(--accent);margin-top:3px}
+.ct-main i.no{color:var(--dim)}
+.ct.dm .ct-main b:after{content:"ЛПР";margin-left:7px;font-size:10px;font-weight:700;
+  color:var(--accent-ink);background:var(--accent);border-radius:4px;padding:1px 5px;
+  vertical-align:middle;letter-spacing:.03em}
+.ct-btn{flex:0 0 42px;height:42px;border-radius:11px;background:var(--raised);
+  border:1px solid var(--line);display:grid;place-items:center;color:var(--accent)}
+.ct-btn:active{background:#202020}
+
 /* ============ ЭТАПЫ ОПЛАТЫ ============ */
 .pbar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;margin:0 0 12px}
 .pbar i{display:block;height:100%;background:var(--accent);transition:width .25s}
@@ -263,7 +279,7 @@ const IC = {
 
 const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
             data:[], stats:null, log:[], filter:'all', own:'mine', q:'',
-            busy:false, back:[], report:null, period:'today', repWho:'all' };
+            busy:false, back:[], contacts:[], report:null, period:'today', repWho:'all' };
 
 /* ─────────── СЕТЬ ─────────── */
 const LS = { get:k=>{try{return JSON.parse(localStorage.getItem(k))}catch{return null}},
@@ -413,6 +429,8 @@ async function openLead(id, push=true){
   try{
     S.lead = (await db(`v_leads?id=eq.${id}&select=*`))[0];
     S.log = await db(`activities?lead_id=eq.${id}&select=*&order=created_at.desc`);
+    S.contacts = await db(`contacts?company_id=eq.${S.lead.company_id}&select=*`
+      + `&order=is_decision_maker.desc,is_primary.desc,created_at.asc`);
     S.view='lead';
   }catch(e){ toast(e.message,true); }
   S.busy=false; render();
@@ -576,23 +594,26 @@ function leadScreen(){
 
   const kv=(k,v,num)=>v==null||v===''?'':`<div class="kv"><dt>${k}</dt><dd class="${num?'num':''}">${v}</dd></div>`;
 
-  const dmWa = l.dm_phone ? `https://wa.me/${l.dm_phone.replace('+','')}` : null;
-  const dm = (l.dm_name||l.dm_phone||l.dm_position) ? `<div class="card dm">
-    <h3>Лицо, принимающее решение</h3>
-    <div class="dm-top">
-      <div class="dm-who">
-        <b>${esc(l.dm_name||'Имя не указано')}</b>
-        ${l.dm_position?`<span>${esc(l.dm_position)}</span>`:''}
-        ${l.dm_phone?`<a href="tel:${l.dm_phone}" class="dm-tel">${fmtPhone(l.dm_phone)}</a>`:''}
-      </div>
-    </div>
-    ${l.dm_phone?`<div class="dm-btns">
-      <a class="act primary" href="tel:${l.dm_phone}"><span class="ic">${IC.phone}</span>Позвонить ЛПР</a>
-      <a class="act" href="${dmWa}" target="_blank" rel="noopener"><span class="ic">${IC.chat}</span>WhatsApp</a>
-    </div>`:''}
-  </div>` : '';
+  const wa2 = p => `https://wa.me/${p.replace('+','')}`;
+  const contactRow = c => `<div class="ct ${c.is_decision_maker?'dm':''}">
+    <button class="ct-main" data-ct="${c.id}">
+      <b>${esc(c.name || (c.is_primary?'Общий номер':'Без имени'))}</b>
+      <span>${[c.position, c.is_decision_maker?'ЛПР':'', c.is_primary?'основной':'']
+        .filter(Boolean).map(esc).join(' · ') || 'должность не указана'}</span>
+      ${c.phone_e164?`<i>${fmtPhone(c.phone_e164)}</i>`:'<i class="no">телефона нет</i>'}
+    </button>
+    ${c.phone_e164?`<a class="ct-btn" href="tel:${c.phone_e164}" aria-label="Позвонить">${IC.phone}</a>
+    <a class="ct-btn" href="${wa2(c.phone_e164)}" target="_blank" rel="noopener" aria-label="WhatsApp">${IC.chat}</a>`:''}
+  </div>`;
+
+  const dm = `<div class="card">
+    <h3>Контакты · ${S.contacts.length}</h3>
+    ${S.contacts.length ? S.contacts.map(contactRow).join('')
+      : '<p style="margin:0 0 4px;color:var(--dim);font-size:14px">Контактов пока нет</p>'}
+    <button class="btn ghost" style="margin-top:12px" data-addct>Добавить контакт</button>
+  </div>`;
+
   const info=`<div class="card"><h3>Компания</h3>
-    ${kv('Телефон', l.primary_phone?`<a href="tel:${l.primary_phone}">${fmtPhone(l.primary_phone)}</a>`:'', 1)}
     ${kv('Сегмент', esc(l.segment))}
     ${kv('Адрес', esc(l.address))}
     ${kv('Точек', l.outlets_count, 1)}
@@ -691,6 +712,22 @@ function touchSheet(){
     <label class="check" style="margin-top:14px"><input type="checkbox" id="wdm">
       Говорил с ЛПР${l.dm_name?` — ${esc(l.dm_name)}`:''}</label>
 
+    <div class="dmblock">
+      <p class="dmhead">Узнал контакт</p>
+      <p class="note" style="margin:6px 0 0">Заполни, если на этом звонке дали телефон
+      управляющего, собственника или другого человека. Запишется сразу в карточку.</p>
+      <label for="nc_name">Имя</label>
+      <input id="nc_name" type="text" placeholder="Как зовут">
+      <label for="nc_pos">Должность</label>
+      <input id="nc_pos" type="text" placeholder="Управляющий" list="poss2">
+      <datalist id="poss2"><option>Собственник</option><option>Управляющий</option>
+        <option>Директор</option><option>Администратор</option><option>Маркетолог</option>
+        <option>Бухгалтер</option></datalist>
+      <label for="nc_phone">Телефон</label>
+      <input id="nc_phone" type="tel" inputmode="tel" placeholder="8 928 000-00-00">
+      <label class="check"><input type="checkbox" id="nc_dm"> Это ЛПР — он принимает решение</label>
+    </div>
+
     <label for="cm">Комментарий</label>
     <textarea id="cm" placeholder="Что сказали. Можно надиктовать голосом"></textarea>
 
@@ -766,15 +803,96 @@ function touchSheet(){
       if(!patch.next_action_at){ toast('Поставь дату следующего шага',true);
         btn.disabled=false; btn.textContent='Сохранить'; return; }
     } else { patch.next_action_at=null; patch.next_action=null; }
+    const nc={ name:d.querySelector('#nc_name').value.trim(),
+               position:d.querySelector('#nc_pos').value.trim(),
+               raw:d.querySelector('#nc_phone').value.trim(),
+               dm:d.querySelector('#nc_dm').checked };
+    nc.phone=phone(nc.raw);
+    const hasNc = !!(nc.name || nc.position || nc.phone);
+    let cm=d.querySelector('#cm').value.trim();
+    if(hasNc) cm = (cm?cm+'\n':'') + '▸ Контакт: '
+      + [nc.name, nc.position, nc.phone?fmtPhone(nc.phone):nc.raw].filter(Boolean).join(', ');
+
     try{
+      if(hasNc) await saveContact(S.lead.company_id, nc);
       await db('activities', { method:'POST', prefer:'return=minimal', body:JSON.stringify({
         lead_id:S.lead.id, author_id:S.prof.id, channel:gv('ch'), outcome:gv('oc'),
         with_dm:d.querySelector('#wdm').checked,
-        comment:d.querySelector('#cm').value.trim()||null }) });
+        comment:cm||null }) });
       await db(`leads?id=eq.${S.lead.id}`, { method:'PATCH', prefer:'return=minimal',
         body:JSON.stringify(patch) });
       d.remove(); toast('Записано'); await openLead(S.lead.id, false);
     }catch(e){ toast(e.message,true); btn.disabled=false; btn.textContent='Сохранить'; }
+  };
+}
+
+// Один вход для всех мест, где заводится контакт: лист касания, карточка, форма лида.
+// Совпадение ищем по номеру, чтобы не плодить одного человека дважды.
+async function saveContact(companyId, c, id){
+  const rows = await db(`contacts?company_id=eq.${companyId}&select=id,phone_e164,is_decision_maker`);
+  const target = id ? rows.find(r=>r.id===id)
+                    : (c.phone ? rows.find(r=>r.phone_e164===c.phone) : null);
+
+  // ЛПР на компанию только один — снимаем метку со старого
+  if(c.dm){
+    const old = rows.find(r=>r.is_decision_maker && r.id!==target?.id);
+    if(old) await db(`contacts?id=eq.${old.id}`,{method:'PATCH',prefer:'return=minimal',
+      body:JSON.stringify({is_decision_maker:false})});
+  }
+
+  const payload={ name:c.name||null, position:c.position||null, is_decision_maker:!!c.dm,
+                  ...(c.phone?{phone_e164:c.phone, phone_raw:c.raw||null}:{}) };
+  if(target) await db(`contacts?id=eq.${target.id}`,{method:'PATCH',prefer:'return=minimal',
+    body:JSON.stringify(payload)});
+  else await db('contacts',{method:'POST',prefer:'return=minimal',
+    body:JSON.stringify({company_id:companyId, ...payload})});
+}
+
+// Лист добавления и правки контакта из карточки
+function contactSheet(existing){
+  const c=existing||{};
+  const d=document.createElement('div');
+  d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 4px;font-size:19px">${existing?'Контакт':'Новый контакт'}</h2>
+    <p style="margin:0 0 6px;color:var(--muted);font-size:13.5px">${esc(S.lead.company_name)}</p>
+    <label for="c_name">Имя</label>
+    <input id="c_name" type="text" value="${esc(c.name||'')}" placeholder="Как зовут">
+    <label for="c_pos">Должность</label>
+    <input id="c_pos" type="text" value="${esc(c.position||'')}" placeholder="Управляющий" list="poss3">
+    <datalist id="poss3"><option>Собственник</option><option>Управляющий</option>
+      <option>Директор</option><option>Администратор</option><option>Маркетолог</option>
+      <option>Бухгалтер</option></datalist>
+    <label for="c_phone">Телефон</label>
+    <input id="c_phone" type="tel" inputmode="tel" value="${esc(c.phone_e164||'')}">
+    <label class="check"><input type="checkbox" id="c_dm" ${c.is_decision_maker?'checked':''}>
+      Это ЛПР — он принимает решение</label>
+    <button class="btn" id="c_save">Сохранить</button>
+    ${existing && isAdmin() ? `<button class="btn warn" id="c_del">Удалить контакт</button>`:''}
+    <button class="btn ghost" id="c_cancel">Отмена</button>
+  </div>`;
+  document.body.appendChild(d);
+  d.querySelector('#c_cancel').onclick=()=>d.remove();
+  d.onclick=e=>{ if(e.target===d) d.remove(); };
+
+  d.querySelector('#c_save').onclick=async()=>{
+    const b=d.querySelector('#c_save'); b.disabled=true; b.textContent='Сохраняю…';
+    const raw=d.querySelector('#c_phone').value.trim();
+    try{
+      await saveContact(S.lead.company_id, {
+        name:d.querySelector('#c_name').value.trim(),
+        position:d.querySelector('#c_pos').value.trim(),
+        raw, phone:phone(raw), dm:d.querySelector('#c_dm').checked }, c.id);
+      d.remove(); toast('Сохранено'); await openLead(S.lead.id, false);
+    }catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Сохранить'; }
+  };
+
+  const del=d.querySelector('#c_del');
+  if(del) del.onclick=async()=>{
+    if(!confirm('Удалить контакт?')) return;
+    try{ await db(`contacts?id=eq.${c.id}`,{method:'DELETE',prefer:'return=minimal'});
+      d.remove(); toast('Удалено'); await openLead(S.lead.id, false);
+    }catch(e){ toast(e.message,true); }
   };
 }
 
@@ -1424,6 +1542,11 @@ function bind(){
       toast('Лид закреплён за тобой'); await openLead(S.lead.id, false);
     }catch(e){ toast(e.message,true); }
   };
+
+  const addct=document.querySelector('[data-addct]');
+  if(addct) addct.onclick=()=>contactSheet(null);
+  document.querySelectorAll('[data-ct]').forEach(b=>b.onclick=()=>
+    contactSheet(S.contacts.find(c=>c.id===b.dataset.ct)));
 
   document.querySelectorAll('[data-stage]').forEach(b=>b.onclick=async()=>{
     const f=b.dataset.stage, on=b.classList.contains('done');
