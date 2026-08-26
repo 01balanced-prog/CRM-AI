@@ -143,6 +143,22 @@ a{color:var(--accent);text-decoration:none}
 .dmhead{font-size:12px;font-weight:650;color:var(--accent);text-transform:uppercase;
   letter-spacing:.08em;margin:14px 0 0}
 
+/* ============ ЭТАПЫ ОПЛАТЫ ============ */
+.pbar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;margin:0 0 12px}
+.pbar i{display:block;height:100%;background:var(--accent);transition:width .25s}
+.stage{width:100%;display:flex;align-items:center;gap:12px;padding:11px 0;
+  border-bottom:1px solid var(--line);text-align:left}
+.stage:last-child{border-bottom:0}
+.stage .tick{flex:0 0 28px;height:28px;border-radius:50%;border:1px solid var(--line);
+  display:grid;place-items:center;font-size:13px;color:var(--dim);font-family:var(--mono)}
+.stage.done .tick{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.stage .who{flex:1;min-width:0}
+.stage .who b{display:block;font-size:14.5px;font-weight:600}
+.stage .who span{display:block;font-size:12px;color:var(--dim);margin-top:1px}
+.stage.done .who span{color:var(--accent)}
+.stage .amt{font-family:var(--mono);font-size:14.5px;color:var(--muted);white-space:nowrap}
+.stage.done .amt{color:var(--text)}
+
 /* ============ ЖУРНАЛ ============ */
 .log{position:relative;padding-left:18px}
 .log:before{content:"";position:absolute;left:4px;top:6px;bottom:6px;width:1px;background:var(--line)}
@@ -600,6 +616,23 @@ function leadScreen(){
            new Date(l.next_action_at).toLocaleDateString('ru-RU',{day:'numeric',month:'long'})}</span>` : '—')}
   </div>`;
 
+  const STAGES=[
+    {n:1, pct:'30%', t:'Прототип',          amt:l.stage1_amount, at:l.paid_1_at, f:'paid_1_at'},
+    {n:2, pct:'30%', t:'Бета-тест',         amt:l.stage2_amount, at:l.paid_2_at, f:'paid_2_at'},
+    {n:3, pct:'40%', t:'Полная интеграция', amt:l.stage3_amount, at:l.paid_3_at, f:'paid_3_at'},
+  ];
+  const paid = l.paid_total||0;
+  const pay = l.setup_amount ? `<div class="card">
+    <h3>Этапы оплаты · ${money(paid)} из ${money(l.setup_amount)}</h3>
+    <div class="pbar"><i style="width:${Math.round(paid/l.setup_amount*100)}%"></i></div>
+    ${STAGES.map(st=>`<button class="stage ${st.at?'done':''}" data-stage="${st.f}">
+      <span class="tick">${st.at?'✓':st.n}</span>
+      <span class="who"><b>${st.pct} — ${st.t}</b>
+        <span>${st.at ? 'оплачено '+human(st.at) : 'ждём оплату'}</span></span>
+      <span class="amt">${money(st.amt)}</span>
+    </button>`).join('')}
+  </div>` : '';
+
   const extra = (l.note||l.todo) ? `<div class="card"><h3>Заметки</h3>
     ${l.note?`<p style="margin:0 0 8px;font-size:14.5px;white-space:pre-wrap">${esc(l.note)}</p>`:''}
     ${l.todo?`<p style="margin:0;font-size:14px;color:var(--warn)">▸ ${esc(l.todo)}</p>`:''}
@@ -624,7 +657,7 @@ function leadScreen(){
     <button class="btn ghost" data-edit>Изменить карточку</button>
     ${isAdmin()?`<button class="btn warn" data-del>Удалить лид</button>`:''}`;
 
-  return head+`<div class="wrap">${acts}${dm}${info}${deal}${extra}${reassign}${log}${btns}</div>`;
+  return head+`<div class="wrap">${acts}${dm}${info}${deal}${pay}${extra}${reassign}${log}${btns}</div>`;
 }
 
 function ev(a){
@@ -1134,6 +1167,17 @@ async function loadReport(){
     sys.some(a=>a.lead_id===l.id && a.status_to===st));
   const won=closedIn('won'), lost=closedIn('lost');
 
+  // Поступило за период — по датам отметок об оплате
+  const {from:pFrom,to:pTo}=periodRange(S.period);
+  let cash=0;
+  leads.filter(leadMine).forEach(l=>{
+    const inRange=d=>d && d>=pFrom && d<pTo;
+    if(inRange(l.paid_1_at)) cash+=l.stage1_amount||0;
+    if(inRange(l.paid_2_at)) cash+=l.stage2_amount||0;
+    if(inRange(l.paid_3_at)) cash+=l.stage3_amount||0;
+  });
+  const cashTotal=leads.filter(leadMine).reduce((s,l)=>s+(l.paid_total||0),0);
+
   const dmTouch=cnt(touches,a=>a.with_dm);
   const dmLeads=new Set(touches.filter(a=>a.with_dm).map(a=>a.lead_id)).size;
   const answered=cnt(touches,a=>a.outcome==='answered');
@@ -1154,7 +1198,7 @@ async function loadReport(){
     won:won.length, lost:lost.length,
     setupSum:won.reduce((s,l)=>s+(l.setup_amount||0),0),
     mrrSum:won.reduce((s,l)=>s+(l.mrr_amount||0),0),
-    dmTouch, dmLeads, lostBy,
+    dmTouch, dmLeads, lostBy, cash, cashTotal,
     pipeline:leads.filter(l=>leadMine(l)&&['proposal_sent','negotiation'].includes(l.status))
                   .reduce((s,l)=>s+(l.mrr_amount||0),0)
   };
@@ -1230,17 +1274,25 @@ function reportSVG(r){
   y+=fH+16;
 
   // деньги
-  box(32,y,W-64,116);
+  box(32,y,W-64,180);
   tx(56,y+32,'ДЕНЬГИ',{s:12,w:600,c:T.mut,ls:'1.4'});
-  const mo=[['Продано, внедрение',nf(r.setupSum)+' ₽',r.setupSum?T.acc:T.dim],
+  const mo=[['Поступило за период',nf(r.cash)+' ₽',r.cash?T.acc:T.dim],
+            ['Продано, внедрение',nf(r.setupSum)+' ₽',r.setupSum?T.acc:T.dim],
             ['Продано, подписка',nf(r.mrrSum)+' ₽/мес',r.mrrSum?T.acc:T.dim],
+            ['Собрано всего',nf(r.cashTotal)+' ₽',T.txt],
             ['В работе, подписка',nf(r.pipeline)+' ₽/мес',T.txt]];
-  mo.forEach(([l,v,c],i)=>{
+  mo.slice(0,3).forEach(([l,v,c],i)=>{
     const x=56+i*((W-112)/3);
     tx(x,y+70,l,{s:13,c:T.mut});
     tx(x,y+96,v,{s:19,w:600,m:true,c});
   });
-  y+=132;
+  p.push(`<line x1="56" y1="${y+118}" x2="${W-56}" y2="${y+118}" stroke="${T.line}"/>`);
+  mo.slice(3).forEach(([l,v,c],i)=>{
+    const x=56+i*((W-112)/3);
+    tx(x,y+142,l,{s:13,c:T.mut});
+    tx(x,y+166,v,{s:17,w:600,m:true,c});
+  });
+  y+=196;
 
   // причины отказов
   const reasons=Object.entries(r.lostBy);
@@ -1372,6 +1424,18 @@ function bind(){
       toast('Лид закреплён за тобой'); await openLead(S.lead.id, false);
     }catch(e){ toast(e.message,true); }
   };
+
+  document.querySelectorAll('[data-stage]').forEach(b=>b.onclick=async()=>{
+    const f=b.dataset.stage, on=b.classList.contains('done');
+    if(on && !confirm('Снять отметку об оплате? Это попадёт в журнал.')) return;
+    b.disabled=true;
+    try{
+      await db(`leads?id=eq.${S.lead.id}`,{method:'PATCH',prefer:'return=minimal',
+        body:JSON.stringify({[f]: on ? null : new Date().toISOString()})});
+      toast(on?'Отметка снята':'Оплата отмечена');
+      await openLead(S.lead.id, false);
+    }catch(e){ toast(e.message,true); b.disabled=false; }
+  });
 
   const os=document.getElementById('own_save');
   if(os) os.onclick=async()=>{
