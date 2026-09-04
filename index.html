@@ -107,6 +107,22 @@ a{color:var(--accent);text-decoration:none}
 .chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:650}
 
 /* ============ КАРТОЧКА ============ */
+/* Закреплённая панель над навигацией: главное действие карточки всегда под пальцем,
+   а не на третьем экране после журнала */
+#app.docked{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
+.dock{position:fixed;left:0;right:0;bottom:calc(58px + env(safe-area-inset-bottom));z-index:25;
+  display:grid;grid-template-columns:56px 1fr;gap:8px;padding:10px 16px;
+  background:linear-gradient(180deg,rgba(8,8,8,0),rgba(8,8,8,.96) 30%)}
+.dock .btn{margin:0;height:52px}
+.dock .dcall{height:52px;border-radius:12px;background:var(--raised);border:1px solid var(--line);
+  display:grid;place-items:center;color:var(--accent)}
+.dock .dcall[disabled]{opacity:.32}
+.toast .tb{display:block;margin-top:8px;padding:9px 0;text-align:center;border-radius:9px;
+  background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:15px;width:100%}
+.more{width:100%;text-align:left;padding:12px 0;margin-top:6px;color:var(--muted);font-size:14.5px;
+  border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.more:after{content:"▾";color:var(--dim)}
+.more.open:after{content:"▴"}
 .actions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
 .act{height:60px;border-radius:var(--r);background:var(--surface);border:1px solid var(--line);
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
@@ -133,11 +149,6 @@ a{color:var(--accent);text-decoration:none}
 .badge2.no{background:rgba(255,82,82,.12);border-color:rgba(255,82,82,.3);color:var(--danger)}
 
 /* ============ ЛПР ============ */
-.card.dm{border-color:rgba(0,230,118,.28);background:linear-gradient(180deg,rgba(0,230,118,.05),transparent 70%)}
-.dm-who b{display:block;font-size:17px;font-weight:650;letter-spacing:-.01em}
-.dm-who span{display:block;font-size:13px;color:var(--muted);margin-top:1px}
-.dm-who .dm-tel{display:inline-block;margin-top:6px;font-family:var(--mono);font-size:15px}
-.dm-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:13px}
 .dmblock{border:1px solid var(--line);border-radius:var(--r);padding:2px 13px 14px;
   margin:18px 0 4px;background:var(--surface)}
 .dmhead{font-size:12px;font-weight:650;color:var(--accent);text-transform:uppercase;
@@ -296,14 +307,21 @@ async function auth(path, body){
   return j;
 }
 
-async function refresh(){
-  const s = LS.get('sess');
-  if(!s?.refresh_token) return null;
-  try{
-    const j = await auth('token?grant_type=refresh_token', {refresh_token:s.refresh_token});
-    j.expires_at = Date.now() + (j.expires_in-60)*1000;
-    LS.set('sess', j); return j;
-  }catch{ LS.del('sess'); return null; }
+// Параллельные запросы (Promise.all в отчёте, загрузка карточки) должны обновлять
+// токен один раз, а не каждый своим refresh_token — второй такой запрос Supabase отвергнет.
+let refreshing=null;
+function refresh(){
+  if(refreshing) return refreshing;
+  refreshing=(async()=>{
+    const s = LS.get('sess');
+    if(!s?.refresh_token) return null;
+    try{
+      const j = await auth('token?grant_type=refresh_token', {refresh_token:s.refresh_token});
+      j.expires_at = Date.now() + (j.expires_in-60)*1000;
+      LS.set('sess', j); return j;
+    }catch{ LS.del('sess'); return null; }
+  })().finally(()=>{ refreshing=null; });
+  return refreshing;
 }
 
 async function token(){
@@ -323,10 +341,15 @@ async function db(path, opts={}){
       'Prefer': opts.prefer || 'return=representation', ...(opts.headers||{}) }
   });
   const txt = await r.text();
-  const j = txt ? JSON.parse(txt) : null;
+  // Ответ может быть не JSON: страница ошибки от прокси, пустое тело при 5xx
+  let j=null; try{ j = txt ? JSON.parse(txt) : null; }catch{ j=null; }
   if(!r.ok) throw new Error(j?.message || j?.hint || `Ошибка ${r.status}`);
   return j;
 }
+
+// Значение для фильтра PostgREST: в кавычках, чтобы запятые и скобки в поиске
+// не ломали запрос («Кафе (центр)», «Чай, кофе»)
+function pgq(v){ return '"'+String(v).replace(/["\\]/g,'\\$&')+'"'; }
 
 /* ─────────── УТИЛИТЫ ─────────── */
 function digitVal(ch){
@@ -351,7 +374,12 @@ function fmtPhone(p){
   return d.length===11 ? `+7 ${d.slice(1,4)} ${d.slice(4,7)}-${d.slice(7,9)}-${d.slice(9)}` : p;
 }
 function money(n){ return n==null ? '—' : new Intl.NumberFormat('ru-RU').format(n)+' ₽'; }
-function iso(d){ return d.toISOString().slice(0,10); }
+// Дата по местному времени, не по UTC: иначе с полуночи до трёх ночи по Грозному
+// «сегодня» превращается во вчера, и чипы дат в листе касания промахиваются.
+function iso(d){
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
 function plusDays(n){ const d=new Date(); d.setDate(d.getDate()+n); return iso(d); }
 function human(s){
   if(!s) return '';
@@ -365,11 +393,16 @@ function human(s){
 }
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function toast(msg, err){
+// action — необязательная кнопка в тосте: {label, fn}. Живёт дольше, чтобы успеть нажать.
+function toast(msg, err, action){
   document.querySelectorAll('.toast').forEach(e=>e.remove());
   const el=document.createElement('div');
   el.className='toast'+(err?' err':''); el.textContent=msg;
-  document.body.appendChild(el); setTimeout(()=>el.remove(), err?5200:2600);
+  if(action){
+    const b=document.createElement('button'); b.className='tb'; b.textContent=action.label;
+    b.onclick=()=>{ el.remove(); action.fn(); }; el.appendChild(b);
+  }
+  document.body.appendChild(el); setTimeout(()=>el.remove(), action?7000 : err?5200:2600);
 }
 const isAdmin = ()=> S.prof?.role==='admin';
 
@@ -400,7 +433,7 @@ async function load(){
     let f='';
     if(S.filter==='open') f = `&status=in.(${OPEN_ST.join(',')})`;
     else if(S.filter!=='all') f = `&status=eq.${S.filter}`;
-    if(S.q) f += `&company_name=ilike.*${encodeURIComponent(S.q)}*`;
+    if(S.q) f += `&company_name=ilike.${encodeURIComponent(pgq('*'+S.q+'*'))}`;
     if(S.own==='mine') f += `&or=(owner_id.eq.${S.prof.id},owner_id.is.null)`;
     else if(S.own==='none') f += `&owner_id=is.null`;
     S.data = await db(`v_leads?select=*${f}&order=score.desc,company_name.asc`);
@@ -436,6 +469,17 @@ async function openLead(id, push=true){
   S.busy=false; render();
 }
 
+// Следующий из очереди на сегодня, минуя экран «Сегодня». Тот, кого только что
+// отработали, из очереди уже выпал (дата шага сдвинулась), но на всякий случай пропускаем.
+async function nextLead(){
+  try{
+    const rows = await db('v_today?select=id&order=next_action_at.asc,score.desc&limit=3');
+    const nx = rows.find(r=>r.id!==S.lead?.id);
+    if(!nx) return toast('На сегодня всё: очередь пуста');
+    await openLead(nx.id, false);
+  }catch(e){ toast(e.message,true); }
+}
+
 async function go(v, push=true){
   // Переход на любую основную вкладку сбрасывает стек: возвращаться некуда
   if(['today','list','more'].includes(v)) S.back.length=0;
@@ -453,6 +497,7 @@ function render(){
   if(!S.prof) return app.innerHTML = noAccessScreen(), bindNoAccess();
   const v = { today:todayScreen, list:listScreen, lead:leadScreen, add:addScreen,
               more:moreScreen, imp:importScreen, report:reportScreen }[S.view] || todayScreen;
+  app.className = (S.view==='lead' && S.lead && !S.busy) ? 'docked' : '';
   app.innerHTML = v() + navBar();
   bind();
 }
@@ -673,12 +718,18 @@ function leadScreen(){
     </select>
     <button class="btn ghost" id="own_save" style="margin-top:10px">Переназначить</button>
   </div>` : '';
-  const btns=`<button class="btn" data-touch>Записать касание</button>
-    ${takeBtn}
+  const btns=`${takeBtn}
     <button class="btn ghost" data-edit>Изменить карточку</button>
     ${isAdmin()?`<button class="btn warn" data-del>Удалить лид</button>`:''}`;
+  // Главное действие закреплено над навигацией, чтобы не листать карточку после звонка
+  const dock=`<div class="dock">
+    ${l.primary_phone
+      ? `<a class="dcall" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`
+      : `<span class="dcall" disabled>${IC.phone}</span>`}
+    <button class="btn" data-touch>Записать касание</button>
+  </div>`;
 
-  return head+`<div class="wrap">${acts}${dm}${info}${deal}${pay}${extra}${reassign}${log}${btns}</div>`;
+  return head+`<div class="wrap">${acts}${dm}${info}${deal}${pay}${extra}${reassign}${log}${btns}</div>`+dock;
 }
 
 function ev(a){
@@ -701,13 +752,36 @@ function touchSheet(){
     <h2 style="margin:0 0 4px;font-size:19px">Касание</h2>
     <p style="margin:0 0 6px;color:var(--muted);font-size:13.5px">${esc(l.company_name)}</p>
 
-    <label>Канал</label>
-    <div class="chips" id="ch">${['call','whatsapp','instagram','meeting'].map((k,i)=>
-      `<button class="chip ${i===0?'on':''}" data-v="${k}">${CHAN[k]}</button>`).join('')}</div>
-
     <label>Чем закончилось</label>
     <div class="chips" id="oc">${['answered','no_answer','callback','sent','refused'].map((k,i)=>
       `<button class="chip ${i===0?'on':''}" data-v="${k}">${OUT[k]}</button>`).join('')}</div>
+
+    <div id="lostBox" style="display:none">
+      <label for="lr">Причина отказа</label>
+      <select id="lr">${Object.entries(LOST).map(([k,v])=>
+        `<option value="${k}">${v}</option>`).join('')}</select>
+    </div>
+
+    <div id="nextBox">
+      <label>Когда следующий шаг</label>
+      <div class="chips" id="dt">
+        <button class="chip" data-d="0">Сегодня</button>
+        <button class="chip on" data-d="1">Завтра</button>
+        <button class="chip" data-d="3">+3 дня</button>
+        <button class="chip" data-d="7">Через неделю</button>
+        <button class="chip" data-d="14">Через 2 недели</button>
+      </div>
+      <input type="date" id="nd" value="${plusDays(1)}">
+    </div>
+
+    <p class="note" id="stHint" style="margin-top:10px"></p>
+
+    <button class="more" id="moreBtn" type="button">Подробнее: канал, ЛПР, контакт, комментарий, тариф</button>
+    <div id="details" hidden>
+
+    <label>Канал</label>
+    <div class="chips" id="ch">${['call','whatsapp','instagram','meeting'].map((k,i)=>
+      `<button class="chip ${i===0?'on':''}" data-v="${k}">${CHAN[k]}</button>`).join('')}</div>
 
     <label class="check" style="margin-top:14px"><input type="checkbox" id="wdm">
       Говорил с ЛПР${l.dm_name?` — ${esc(l.dm_name)}`:''}</label>
@@ -735,35 +809,26 @@ function touchSheet(){
     <select id="st">${Object.entries(STATUS).map(([k,v])=>
       `<option value="${k}" ${k===l.status?'selected':''}>${v}</option>`).join('')}</select>
 
-    <div id="lostBox" style="display:none">
-      <label for="lr">Причина отказа</label>
-      <select id="lr">${Object.entries(LOST).map(([k,v])=>
-        `<option value="${k}">${v}</option>`).join('')}</select>
-    </div>
-
-    <div id="nextBox">
-      <label>Когда следующий шаг</label>
-      <div class="chips" id="dt">
-        <button class="chip" data-d="0">Сегодня</button>
-        <button class="chip on" data-d="1">Завтра</button>
-        <button class="chip" data-d="3">+3 дня</button>
-        <button class="chip" data-d="7">Через неделю</button>
-        <button class="chip" data-d="14">Через 2 недели</button>
-      </div>
-      <input type="date" id="nd" value="${plusDays(1)}">
-      <label for="na">Что сделать</label>
-      <input type="text" id="na" placeholder="Перезвонить, уточнить решение" value="${esc(l.next_action||'')}">
-    </div>
+    <label for="na">Что сделать следующим шагом</label>
+    <input type="text" id="na" placeholder="Перезвонить, уточнить решение" value="${esc(l.next_action||'')}">
 
     <label>Тариф</label>
     <select id="tf"><option value="">Не выбран</option>${S.tariffs.map(t=>
       `<option value="${t.code}" ${t.code===l.tariff?'selected':''}>${t.title} · ${
        money(t.setup_amount)} + ${money(t.mrr_amount)}/мес</option>`).join('')}</select>
 
+    </div>
+
     <button class="btn" id="save">Сохранить</button>
     <button class="btn ghost" id="cancel">Отмена</button>
   </div>`;
   document.body.appendChild(d);
+
+  // Два уровня: сверху исход и дата, два тапа для «не взял». Остальное под «Подробнее».
+  const details=d.querySelector('#details'), moreBtn=d.querySelector('#moreBtn');
+  const openDetails=()=>{ details.hidden=false; moreBtn.classList.add('open'); };
+  moreBtn.onclick=()=>{ details.hidden ? openDetails()
+    : (details.hidden=true, moreBtn.classList.remove('open')); };
 
   const pick=(id)=>{ const w=d.querySelector('#'+id);
     w.onclick=e=>{ const b=e.target.closest('[data-v],[data-d]'); if(!b) return;
@@ -777,9 +842,15 @@ function touchSheet(){
   const sync=()=>{
     d.querySelector('#lostBox').style.display = st.value==='lost'?'block':'none';
     d.querySelector('#nextBox').style.display = ['new','won','lost'].includes(st.value)?'none':'block';
+    // Статус выбирается сам по исходу; показываем, что уйдёт в базу, не раскрывая подробностей
+    d.querySelector('#stHint').textContent = st.value===l.status
+      ? `Статус останется: ${STATUS[st.value]}` : `Статус станет: ${STATUS[st.value]}`;
   };
   st.onchange=sync; sync();
   function autoStatus(o){
+    // Передумал после «Отказ»: возвращаем исходный статус, иначе «Отказ» залипает,
+    // а селект статуса спрятан под «Подробнее»
+    if(st.value==='lost' && o!=='refused' && l.status!=='lost') st.value=l.status;
     if(o==='no_answer' && ['new','no_answer'].includes(st.value)) st.value='no_answer';
     if(o==='answered' && ['new','no_answer'].includes(st.value)) st.value='contacted';
     if(o==='refused') st.value='lost';
@@ -821,7 +892,8 @@ function touchSheet(){
         comment:cm||null }) });
       await db(`leads?id=eq.${S.lead.id}`, { method:'PATCH', prefer:'return=minimal',
         body:JSON.stringify(patch) });
-      d.remove(); toast('Записано'); await openLead(S.lead.id, false);
+      d.remove(); await openLead(S.lead.id, false);
+      toast('Записано', false, {label:'Следующий →', fn:nextLead});
     }catch(e){ toast(e.message,true); btn.disabled=false; btn.textContent='Сохранить'; }
   };
 }
@@ -1035,7 +1107,18 @@ function moreScreen(){
     <button class="btn warn" id="out">Выйти</button>
     <p class="note">Balance CRM · данные хранятся в Supabase, доступ по ролям.
     Журнал касаний неизменяем.</p>
+    <p class="note" id="ver"></p>
   </div>`;
+}
+
+// Версия кэша из sw.js: видно, приехала ли правка на телефон, не заглядывая в код
+async function showVersion(){
+  const el=document.getElementById('ver'); if(!el) return;
+  try{
+    const t=await (await fetch('./sw.js',{cache:'no-store'})).text();
+    const m=t.match(/balance-crm-v(\d+)/);
+    if(m) el.textContent=`Версия ${m[1]}`;
+  }catch{}
 }
 
 async function exportAll(){
@@ -1587,7 +1670,10 @@ function bind(){
   const exp=document.getElementById('exp'); if(exp) exp.onclick=exportAll;
   const rel=document.getElementById('reload'); if(rel) rel.onclick=()=>{ go(S.view); toast('Обновлено'); };
   const out=document.getElementById('out');
-  if(out && S.view==='more') out.onclick=()=>{ LS.del('sess'); S.user=null; S.prof=null; render(); };
+  if(out && S.view==='more'){
+    out.onclick=()=>{ LS.del('sess'); S.user=null; S.prof=null; render(); };
+    showVersion();
+  }
 
   const prev=document.getElementById('prev');
   if(prev) prev.onclick=async()=>{
