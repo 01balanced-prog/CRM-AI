@@ -12,7 +12,8 @@
 | | |
 |---|---|
 | `db/12_readonly.sql` | роль `crm_readonly`, права, политики, функция выпуска ключа |
-| `integrations/composio/crm-readonly.openapi.yaml` | описание коннектора для импорта в Composio |
+| `integrations/composio/mcp/index.ts` | MCP-сервер: то, из чего Composio собирает свой коннектор |
+| `integrations/composio/crm-readonly.openapi.yaml` | описание той же поверхности в OpenAPI: для прямых запросов и для сверки |
 | `integrations/composio/verify.sh` | проверка ключа: пять чтений и шесть попыток записи |
 
 ## Шаг 1. Применить миграцию
@@ -59,63 +60,98 @@ revoke crm_readonly from authenticator;   -- все ключи перестаю�
 grant  crm_readonly to authenticator;     -- вернуть доступ
 ```
 
-## Шаг 3. Собрать свой коннектор в Composio
+## Шаг 3. Поставить MCP-сервер
 
-Всё под аккаунтом компании в Composio, не под личным.
+Свой коннектор в Composio собирается **только из MCP-сервера**: в диалоге
+«Add Custom MCP» просят URL сервера, а импорта OpenAPI в дашборде нет. Supabase
+отдаёт обычный REST, поэтому между ними ставится тонкая прослойка —
+`integrations/composio/mcp/index.ts`.
 
-1. Dashboard → Apps → **Create custom toolkit** (свой коннектор).
-2. Способ описания — **OpenAPI**. Загрузить
-   `integrations/composio/crm-readonly.openapi.yaml`.
-   Название — `Balance CRM (только чтение)`.
-3. Аутентификация — **API Key**, два заголовка с одним и тем же значением:
+Своих прав у неё нет ни одного. Ключ приходит от Composio в заголовке
+`Authorization` и передаётся в базу как есть: что разрешено ключу, то и
+произойдёт. Сервер живёт в том же проекте Supabase, новых поставщиков и
+паролей не появляется.
 
-   | Заголовок | Значение |
-   |---|---|
-   | `apikey` | ключ из шага 2 |
-   | `Authorization` | `Bearer ` + ключ из шага 2 |
+1. Supabase → слева **Edge Functions** → **Deploy a new function** → **Via Editor**.
+2. Имя функции: `crm-mcp`. Ровно так, оно попадёт в URL.
+3. Стереть заготовку и вставить целиком
+   [`integrations/composio/mcp/index.ts`](../integrations/composio/mcp/index.ts).
+4. **Deploy**.
+5. Открыть функцию → её настройки → выключить **Verify JWT** (проверку токена
+   самой платформой). Иначе Supabase отобьёт запрос Composio раньше, чем тот
+   дойдёт до базы: Composio присылает только `Authorization`, а платформа ждёт
+   ещё и `apikey`.
 
-   Supabase требует оба: первый проходит шлюз, второй определяет роль в базе.
-4. Сохранить и подключить (Connect) — появится подключение с этим ключом.
+   Открытым доступ от этого не становится: без ключа функция ничего не отдаёт,
+   а с ключом отдаёт ровно то, что ключу разрешено. Все проверки — в базе.
+
+Адрес получится такой:
+
+```
+https://wiokdxswbcmjdpalyrat.supabase.co/functions/v1/crm-mcp
+```
+
+## Шаг 4. Собрать коннектор в Composio
+
+Под аккаунтом компании, не под личным.
+
+Dashboard → **Apps** → **Add Custom MCP**. Заполнить:
+
+| Поле | Значение |
+|---|---|
+| Display name | `Balance CRM (только чтение)` |
+| MCP server URL | `https://wiokdxswbcmjdpalyrat.supabase.co/functions/v1/crm-mcp` |
+| Authentication | `API key` |
+| Header name | `Authorization` |
+| Header prefix | `Bearer` |
+
+**Add** → подключить (Connect) → в поле ключа вставить ключ из шага 2.
+Подключение должно стать Active.
 
 Готовый коннектор Supabase из каталога Composio **не подходит**: он работает
 через управляющий токен аккаунта Supabase, а это полный доступ к проекту.
 Нужен свой, с ключом только на чтение.
 
-## Шаг 4. Что читается
+## Шаг 5. Что читается
 
-| Операция | Что отдаёт |
+Коннектор отдаёт шесть инструментов:
+
+| Инструмент | Что делает |
 |---|---|
-| `listLeads` | лиды карточкой: компания, ЛПР, статус, тариф, суммы, этапы оплаты, следующий шаг, число касаний |
-| `listLeadsTable` | таблица `leads` без склейки с компанией |
-| `listCompanies` | заведения |
-| `listContacts` | контакты: основной номер и ЛПР |
-| `listActivities` | журнал касаний |
-| `listTariffs` | тарифы |
-| `checkWriteRejected` | попытка записи; обязана вернуть 403 |
-
-Фильтры PostgREST: `status=eq.negotiation`, `status=in.(won,lost)`,
-`next_action_at=lte.2026-09-30`, `company_name=ilike.*беркат*`.
+| `list_leads` | лиды со всеми полями и статусами; фильтры по статусу, «только открытые», поиск по названию |
+| `get_lead` | один лид целиком |
+| `list_activities` | журнал касаний |
+| `list_companies` | заведения |
+| `list_tariffs` | тарифы |
+| `check_write_rejected` | пробует создать лид; обязан вернуть 403 и код `42501` |
 
 Наружу **не отдаются**: `custom_pricing` (ручные цены), `invites`, `plans`,
 `plan_defaults`, `ramp_steps`, `scripts`, `lessons`, `lesson_progress`,
 `coaching_notes`. Это внутренняя кухня отдела и персональные данные сотрудников,
 к лидам отношения не имеют.
 
-## Шаг 5. Проверить
+## Шаг 6. Проверить
 
-Через Composio: выполнить `listLeads` — вернётся список лидов; затем
-`checkWriteRejected` — вернётся `403` и
-`{"code":"42501","message":"permission denied for table leads"}`.
+В Composio выполнить `list_leads` — вернётся список лидов со статусами и
+суммами. Затем `check_write_rejected` — вернётся:
 
-Тем же ключом с любого компьютера:
+```json
+{
+  "проверка": "попытка создать лид тем же ключом",
+  "код_ответа": 403,
+  "ответ_базы": { "code": "42501", "message": "permission denied for table leads" },
+  "итог": "запись отклонена, доступ только на чтение"
+}
+```
+
+Тем же ключом мимо Composio, если есть компьютер с терминалом:
 
 ```bash
 sh integrations/composio/verify.sh '<ключ>'
 ```
 
-Скрипт делает пять чтений и шесть попыток записи (POST, PATCH, DELETE, вставку
-в журнал и вызов процедуры `log_touch`) и печатает итог. Должно быть
-«Совпало: 11, разошлось: 0».
+Пять чтений и шесть попыток записи (POST, PATCH, DELETE, вставка в журнал и
+вызов процедуры `log_touch`). Должно быть «Совпало: 11, разошлось: 0».
 
 Если хоть одна запись прошла — немедленно `revoke crm_readonly from authenticator;`
 и разбираться.
@@ -141,6 +177,9 @@ sh integrations/composio/verify.sh '<ключ>'
 
 Postgres 16, вся цепочка `db/00`–`db/12` с нуля, каждый файл дважды, поверх
 живой PostgREST 12.2.3 с ключом, выпущенным `crm_readonly_token()`.
+MCP-сервер прогнан против той же базы: `initialize`, `tools/list`, все шесть
+инструментов, пачка сообщений, поток `text/event-stream`, запрос без ключа
+и с чужим ключом.
 
 - Чтение ключом: `v_leads`, `leads`, `companies`, `contacts`, `activities`,
   `tariffs` — 200.
