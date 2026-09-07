@@ -117,6 +117,30 @@ a{color:var(--accent);text-decoration:none}
 .dock .dcall{height:52px;border-radius:12px;background:var(--raised);border:1px solid var(--line);
   display:grid;place-items:center;color:var(--accent)}
 .dock .dcall[disabled]{opacity:.32}
+.dock .dscript{height:52px;border-radius:12px;background:var(--raised);border:1px solid var(--line);
+  padding:0 14px;font-weight:600;font-size:15px;color:var(--text);white-space:nowrap}
+.dock.three{grid-template-columns:56px auto 1fr}
+/* ============ СКРИПТ И УРОК ============ */
+.txt{font-size:15.5px;line-height:1.55}
+.txt p{margin:0 0 12px}
+.txt ul{margin:0 0 12px;padding-left:20px}
+.txt li{margin:3px 0}
+.txt b{color:var(--text)}
+.txt .var{color:var(--accent)}
+.obj{border-top:1px solid var(--line);padding:10px 0}
+.obj button{width:100%;text-align:left;font-size:15px;font-weight:600;padding:4px 0;display:flex;justify-content:space-between}
+.obj button:after{content:"▾";color:var(--dim)}
+.obj.open button:after{content:"▴"}
+.obj .ans{display:none;margin-top:6px;color:var(--muted)}
+.obj.open .ans{display:block}
+.q{border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin:12px 0;background:var(--surface)}
+.q .qt{font-weight:600;margin-bottom:6px}
+.q .opt{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:15px}
+.q .opt input{width:20px;height:20px;accent-color:var(--accent);flex:0 0 20px}
+.q.ok{border-color:rgba(0,230,118,.5)}
+.q.bad{border-color:rgba(255,82,82,.5)}
+.q .hint{margin-top:8px;font-size:14px;color:var(--warn)}
+.q.ok .hint{color:var(--accent)}
 .toast .tb{display:block;margin-top:8px;padding:9px 0;text-align:center;border-radius:9px;
   background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:15px;width:100%}
 .more{width:100%;text-align:left;padding:12px 0;margin-top:6px;color:var(--muted);font-size:14.5px;
@@ -241,6 +265,44 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .tbl th{color:var(--muted);font-weight:600;background:var(--raised)}
 .note{font-size:13px;color:var(--dim);margin-top:8px;line-height:1.5}
 
+/* ============ ПЛАН ============ */
+.plan h3 .sub2{display:block;margin-top:2px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim)}
+.pm{display:grid;grid-template-columns:84px 1fr 64px;gap:10px;align-items:center;padding:6px 0}
+.pm .pl{font-size:14px;color:var(--muted)}
+.pb{height:8px;border-radius:4px;background:var(--raised);position:relative;overflow:hidden}
+.pb i{display:block;height:100%;background:var(--muted);border-radius:4px;transition:width .25s}
+.pb .tick{position:absolute;top:0;width:2px;height:100%;background:var(--text);opacity:.55}
+.pm.done .pb i{background:var(--accent)}
+.pm .pv{font-family:var(--mono);font-size:14px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pm.done .pv{color:var(--accent)}
+.pline{margin:8px 0 0;font-size:13px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums}
+.pline b{color:var(--text);font-weight:600}
+/* ============ КОМАНДА ============ */
+.person{width:100%;display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);text-align:left}
+.person:last-child{border-bottom:0}
+.person .av{flex:0 0 40px;height:40px;border-radius:50%;background:var(--raised);border:1px solid var(--line);
+  display:grid;place-items:center;font-weight:700;color:var(--accent)}
+.person.off .av{color:var(--dim)}
+.person .who{flex:1;min-width:0}
+.person .who b{display:block;font-size:15.5px;font-weight:650}
+.person .who .st{display:block;font-size:12.5px;color:var(--muted);margin-top:1px;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.person.off .who b{color:var(--muted)}
+.person .arr{color:var(--dim);font-size:20px}
+.inv{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+.inv:last-child{border-bottom:0}
+.inv .em{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inv .em i{display:block;font-style:normal;font-size:12px;color:var(--muted)}
+.inv .x{flex:0 0 40px;height:40px;display:grid;place-items:center;color:var(--dim);font-size:20px}
+.link{display:flex;align-items:center;justify-content:space-between;width:100%;padding:14px 0;
+  border-bottom:1px solid var(--line);font-size:15.5px;text-align:left}
+.link:last-child{border-bottom:0}
+.link:after{content:"›";color:var(--dim);font-size:20px}
+.link .cnt{font-family:var(--mono);color:var(--dim);font-size:13px;margin-right:8px}
+.notice{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.3);border-radius:var(--r);
+  padding:12px 14px;margin-bottom:12px;font-size:14px;display:flex;gap:10px;align-items:center}
+.notice b{color:var(--warn)}
+.notice .go{margin-left:auto;color:var(--warn);font-weight:700;white-space:nowrap}
+
 /* ============ ОТЧЁТ ============ */
 #rep{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--ink)}
 #rep svg{display:block;width:100%;height:auto}
@@ -290,7 +352,20 @@ const IC = {
 
 const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
             data:[], stats:null, log:[], filter:'all', own:'mine', q:'',
-            busy:false, back:[], contacts:[], report:null, period:'today', repWho:'all' };
+            busy:false, back:[], contacts:[], report:null, period:'today', repWho:'all',
+            plan:null, streak:0, team:[], person:null, invites:[], defaults:null, ramp:[],
+            scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null };
+
+const METRIC = { calls:'Звонки', talks:'Разговоры', dm_talks:'ЛПР', taken:'Взял в работу',
+  briefs:'Брифы', proposals:'КП', won:'Сделки', cash:'Деньги' };
+const ROLE = { admin:'администратор', manager:'менеджер' };
+const STAGE = { first_call:'Первый звонок', gatekeeper:'Обход администратора', callback:'После недозвона',
+  brief:'Бриф', after_proposal:'После КП', closing:'Дожим' };
+const STAGE_BY_STATUS = { new:'first_call', no_answer:'callback', contacted:'brief', brief_done:'after_proposal',
+  proposal_sent:'after_proposal', negotiation:'closing', won:'closing', lost:'first_call' };
+const MODULE = { product:'Продукт', sales:'Продажи', crm:'CRM' };
+const monthKey = d => { const x=d||new Date(); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-01`; };
+const monthName = d => new Date(d).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
 
 /* ─────────── СЕТЬ ─────────── */
 const LS = { get:k=>{try{return JSON.parse(localStorage.getItem(k))}catch{return null}},
@@ -358,6 +433,48 @@ function uuid(){
   const h=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
   return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
 }
+
+// Текст скрипта или урока: пустая строка делит абзацы, «- » пункт, **жирный**,
+// подстановки {компания}, {лпр}, {тариф}, {внедрение}, {подписка} из карточки лида
+function fmt(text, lead){
+  const sub = v => {
+    if(!lead) return `<span class="var">{${v}}</span>`;
+    const t = lead.tariff ? S.tariffs.find(x=>x.code===lead.tariff) : null;
+    const m = { 'компания':lead.company_name, 'лпр':lead.dm_name, 'тариф':t?.title,
+      'внедрение':lead.setup_amount!=null?money(lead.setup_amount):null,
+      'подписка':lead.mrr_amount!=null?money(lead.mrr_amount)+'/мес':null }[v];
+    return m ? `<span class="var">${esc(m)}</span>` : `<span class="var">…</span>`;
+  };
+  const inl = t => esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+    .replace(/\{(компания|лпр|тариф|внедрение|подписка)\}/g,(_,v)=>sub(v));
+  return String(text||'').split(/\n\s*\n/).map(par=>{
+    const lines=par.split('\n');
+    if(lines.every(l=>/^\s*-\s/.test(l))) return `<ul>${lines.map(l=>`<li>${inl(l.replace(/^\s*-\s/,''))}</li>`).join('')}</ul>`;
+    return `<p>${lines.map(inl).join('<br>')}</p>`;
+  }).join('');
+}
+
+// Очередь касаний без связи. client_id делает повтор безопасным: база не создаст дубль.
+const isOffline = e => e && (e.name==='TypeError' || /fetch|network|сет/i.test(e.message||'')) && !navigator.onLine
+  || (e && e.name==='TypeError');
+function queueGet(){ return LS.get('queue')||[]; }
+function queueAdd(item){ const q=queueGet(); q.push({...item, at:Date.now()}); LS.set('queue',q); }
+let flushing=false;
+async function flushQueue(){
+  if(flushing) return; const q=queueGet(); if(!q.length) return;
+  flushing=true; let sent=0;
+  try{
+    for(const item of [...q]){
+      try{ await rpc('log_touch', item.args); sent++; LS.set('queue', queueGet().filter(x=>x.args.client_id!==item.args.client_id)); }
+      catch(e){ if(isOffline(e)) break; // связи всё ещё нет, остальные подождут
+        // Ошибка правила базы: касание отправлять бессмысленно, убираем и говорим
+        LS.set('queue', queueGet().filter(x=>x.args.client_id!==item.args.client_id));
+        toast(`Касание не принято: ${e.message}`, true); }
+    }
+  } finally { flushing=false; }
+  if(sent){ toast(`Связь есть: отправлено касаний — ${sent}`); if(S.view==='today') go('today'); }
+}
+window.addEventListener('online', flushQueue);
 
 // Значение для фильтра PostgREST: в кавычках, чтобы запятые и скобки в поиске
 // не ломали запрос («Кафе (центр)», «Чай, кофе»)
@@ -429,7 +546,8 @@ async function boot(){
     if(!p.length){ S.prof=null; return render(); }
     S.prof = p[0];
     S.tariffs = await db('tariffs?select=*&order=sort_order');
-    if(S.prof.role==='admin') S.staff = await db('profiles?select=id,name,role&order=name');
+    if(S.prof.role==='admin') S.staff = await db('profiles?select=id,name,role,active,started_at,ramp_enabled&order=name');
+    flushQueue();
     await load();
   }catch(e){ toast(e.message, true); }
   render();
@@ -437,8 +555,27 @@ async function boot(){
 
 async function load(){
   if(S.view==='today'){
-    S.data = await db('v_today?select=*');
-    S.stats = (await db('v_stats?select=*'))[0];
+    const [data, stats, plan, streak, notes, team] = await Promise.all([
+      db('v_today?select=*'), db('v_stats?select=*'), db('v_plan_today?select=*'),
+      rpc('plan_streak', {}).catch(()=>0),
+      isAdmin() ? [] : db('coaching_notes?read_at=is.null&select=*&order=created_at.desc'),
+      isAdmin() ? db('v_team_today?select=*&order=name') : [],
+    ]);
+    S.data=data; S.stats=stats[0]; S.plan=plan[0]||null; S.streak=streak||0; S.notes=notes; S.team=team;
+    if(!isAdmin()) await loadLearn(true);
+  } else if(S.view==='team'){
+    const [team, invites] = await Promise.all([
+      db('v_team_today?select=*&order=name'),
+      db('invites?used_at=is.null&select=*&order=created_at.desc') ]);
+    S.team=team; S.invites=invites;
+    S.staff = await db('profiles?select=id,name,role,active,started_at,ramp_enabled&order=name');
+  } else if(S.view==='person'){
+    await loadPerson();
+  } else if(S.view==='norms'){
+    const [d, r] = await Promise.all([db('plan_defaults?select=*'), db('ramp_steps?select=*&order=week')]);
+    S.defaults=d[0]; S.ramp=r;
+  } else if(S.view==='learn'){
+    await loadLearn();
   } else if(S.view==='report'){
     await loadReport();
   } else if(S.view==='list'){
@@ -455,7 +592,8 @@ async function load(){
 // Экраны lead/add/imp — вложенные: с них возвращаемся туда, откуда пришли.
 // Тот же стек обслуживает и системный жест «назад».
 function pushScreen(){
-  S.back.push({view:S.view, leadId:S.lead?.id, filter:S.filter, own:S.own, q:S.q});
+  S.back.push({view:S.view, leadId:S.lead?.id, personId:S.person?.id, lessonId:S.lesson?.id,
+               filter:S.filter, own:S.own, q:S.q});
   try{ history.pushState({depth:S.back.length}, ''); }catch{}
 }
 
@@ -464,6 +602,8 @@ async function popScreen(){
   if(!prev) return go('today');
   S.editing=null;
   if(prev.view==='lead' && prev.leadId) return openLead(prev.leadId, false);
+  if(prev.view==='person' && prev.personId) S.person = S.staff.find(u=>u.id===prev.personId) || S.person;
+  if(prev.view==='lesson' && prev.lessonId) S.lesson = S.lessons.find(l=>l.id===prev.lessonId) || S.lesson;
   S.filter=prev.filter; S.own=prev.own; S.q=prev.q;
   return go(prev.view, false);
 }
@@ -476,6 +616,8 @@ async function openLead(id, push=true){
     S.log = await db(`activities?lead_id=eq.${id}&select=*&order=created_at.desc`);
     S.contacts = await db(`contacts?company_id=eq.${S.lead.company_id}&select=*`
       + `&order=is_decision_maker.desc,is_primary.desc,created_at.asc`);
+    if(!S.scripts.length) S.scripts = await db('scripts?select=*&order=sort_order');
+    S.callScript=null;
     S.view='lead';
   }catch(e){ toast(e.message,true); }
   S.busy=false; render();
@@ -494,7 +636,7 @@ async function nextLead(){
 
 async function go(v, push=true){
   // Переход на любую основную вкладку сбрасывает стек: возвращаться некуда
-  if(['today','list','more'].includes(v)) S.back.length=0;
+  if(['today','list','more','team','learn'].includes(v)) S.back.length=0;
   else if(push && v!==S.view) pushScreen();
   S.view=v; S.busy=true; render();
   try{ await load(); }catch(e){ toast(e.message,true); }
@@ -508,7 +650,9 @@ function render(){
   if(!S.user) return app.innerHTML = loginScreen(), bindLogin();
   if(!S.prof) return app.innerHTML = noAccessScreen(), bindNoAccess();
   const v = { today:todayScreen, list:listScreen, lead:leadScreen, add:addScreen,
-              more:moreScreen, imp:importScreen, report:reportScreen }[S.view] || todayScreen;
+              more:moreScreen, imp:importScreen, report:reportScreen,
+              team:teamScreen, person:personScreen, norms:normsScreen,
+              learn:learnScreen, lesson:lessonScreen }[S.view] || todayScreen;
   app.className = (S.view==='lead' && S.lead && !S.busy) ? 'docked' : '';
   app.innerHTML = v() + navBar();
   bind();
@@ -535,6 +679,9 @@ function loginScreen(){
     <input id="pw" type="password" autocomplete="current-password">
     <button class="btn" id="go">Войти</button>
     <p class="note" id="er"></p>
+    <button class="btn ghost" id="reg">Первый вход по приглашению</button>
+    <p class="note">Если администратор пригласил тебя по почте: впиши эту почту, придумай пароль
+    и нажми «Первый вход». Доступ появится сразу.</p>
   </div>`;
 }
 
@@ -556,6 +703,18 @@ function bindLogin(){
   };
   go.onclick=run;
   document.getElementById('pw').onkeydown=e=>{ if(e.key==='Enter') run(); };
+  document.getElementById('reg').onclick=async()=>{
+    const em=document.getElementById('em').value.trim();
+    const pw=document.getElementById('pw').value;
+    const er=document.getElementById('er');
+    if(!em||!pw) return er.textContent='Впиши почту из приглашения и придумай пароль';
+    if(pw.length<6) return er.textContent='Пароль не короче 6 символов';
+    try{
+      const j=await auth('signup',{email:em,password:pw});
+      if(j.access_token){ j.expires_at=Date.now()+(j.expires_in-60)*1000; LS.set('sess',j); return boot(); }
+      er.textContent='Аккаунт создан. Подтверди почту по ссылке из письма и войди';
+    }catch(e){ er.textContent = /registered|exists/i.test(e.message) ? 'Такой аккаунт уже есть: просто войди' : e.message; }
+  };
 }
 
 function noAccessScreen(){
@@ -585,7 +744,54 @@ function todayScreen(){
     ? S.data.map(row).join('')
     : `<div class="empty"><div class="big">✓</div><p>На сегодня звонков нет</p>
        <p class="hint">Открой «Лиды» и возьми следующего из тех, кто не в работе</p></div>`;
-  return head+`<div class="wrap">${stats}${rows}</div>`;
+  const notes = S.notes.length ? `<button class="notice" data-notes>
+    <b>Наставник</b> ${S.notes.length===1?'1 замечание':S.notes.length+' замечания'}<span class="go">Читать</span></button>` : '';
+  const team = isAdmin() && S.team.length ? `<div class="card"><h3>Команда сегодня</h3>
+    ${S.team.filter(t=>t.profile_id!==S.prof.id).map(personRow).join('') ||
+      '<p class="note" style="margin:0">Пока только вы. Пригласите людей во вкладке «Команда».</p>'}
+  </div>` : '';
+  const foot = isAdmin() ? '' : `<button class="btn ghost" data-nav="report">Отчёт за сегодня</button>`;
+  const q=queueGet().length;
+  const queue = q ? `<button class="notice" id="q_retry"><b>Не отправлено</b> ${q===1?'1 касание':q+' касания'} — нет связи<span class="go">Повторить</span></button>` : '';
+  const mk='exp-'+monthKey().slice(0,7);
+  const exp = isAdmin() && new Date().getDate()<=3 && !LS.get(mk)
+    ? `<button class="notice" id="exp"><b>Первое число</b> сделай выгрузку в Excel: бэкапов нет<span class="go">Выгрузить</span></button>` : '';
+  return head+`<div class="wrap">${stats}${queue}${exp}${planBlock(S.plan, S.streak)}${notes}${lessonOfDay()}${team}${rows}${foot}</div>`;
+}
+
+// Полоска на метрику, справа факт/план моноширинным. Засечка — где надо быть к этому часу.
+function planBlock(p, streak, compact){
+  if(!p) return '';
+  const done=(f,pl)=>pl>0 && f>=pl;
+  const bar=(k,f,pl)=>{
+    const w = pl>0 ? Math.min(100, Math.round(f/pl*100)) : (f>0?100:0);
+    return `<div class="pm ${done(f,pl)?'done':''}"><span class="pl">${METRIC[k]}</span>
+      <div class="pb"><i style="width:${w}%"></i>${pl>0&&!done(f,pl)?`<b class="tick" style="left:${Math.round(pace()*100)}%"></b>`:''}</div>
+      <span class="pv">${f}/${pl}${done(f,pl)?' ✓':''}</span></div>`;
+  };
+  const src = p.source==='ramp' ? `разгон ${p.pct}% · ${p.week}-я неделя`
+            : p.source==='personal' ? 'личный план' : '';
+  const ser = streak>0 ? `серия ${streak} ${streak%10===1&&streak%100!==11?'день':streak%10>=2&&streak%10<=4&&(streak%100<10||streak%100>=20)?'дня':'дней'}` : '';
+  return `<div class="card plan">
+    <h3>${compact?'Сегодня':'План на сегодня'}<span class="sub2">${[src,ser].filter(Boolean).join(' · ')}</span></h3>
+    ${bar('calls',p.calls,p.calls_day)}${bar('talks',p.talks,p.talks_day)}${bar('dm_talks',p.dm_talks,p.dm_talks_day)}
+    <p class="pline">Неделя: брифы <b>${p.briefs}/${p.briefs_week}</b> · КП <b>${p.proposals}/${p.proposals_week}</b></p>
+    <p class="pline">Месяц: сделки <b>${p.won}/${p.won_month}</b> · деньги <b>${money(p.cash).replace(' ₽','')}</b> из ${money(p.cash_month)}</p>
+  </div>`;
+}
+// Доля рабочего дня 9:00–18:00 по Москве, прошедшая к текущему часу
+function pace(){
+  const m=new Date(new Date().toLocaleString('en-US',{timeZone:'Europe/Moscow'}));
+  return Math.max(0, Math.min(1, (m.getHours()+m.getMinutes()/60-9)/9));
+}
+function personRow(t){
+  const st = S.staff.find(u=>u.id===t.profile_id);
+  const off = st && !st.active;
+  return `<button class="person ${off?'off':''}" data-person="${t.profile_id}">
+    <span class="av">${esc((t.name||'?')[0].toUpperCase())}</span>
+    <span class="who"><b>${esc(t.name)}${t.role==='admin'?' <span class="sc">админ</span>':''}</b>
+      <span class="st">${off ? 'доступ выключен' : `звонки ${t.calls}/${t.calls_day} · разговоры ${t.talks}/${t.talks_day} · ЛПР ${t.dm_talks}/${t.dm_talks_day}`}</span></span>
+    <span class="arr">›</span></button>`;
 }
 
 function row(l){
@@ -725,7 +931,7 @@ function leadScreen(){
   const reassign = isAdmin() ? `<div class="card"><h3>Ответственный</h3>
     <select id="own_sel">
       <option value="">Ничей</option>
-      ${S.staff.map(u=>`<option value="${u.id}" ${u.id===l.owner_id?'selected':''}>${
+      ${S.staff.filter(u=>u.active||u.id===l.owner_id).map(u=>`<option value="${u.id}" ${u.id===l.owner_id?'selected':''}>${
         esc(u.name)}${u.role==='admin'?' (админ)':''}</option>`).join('')}
     </select>
     <button class="btn ghost" id="own_save" style="margin-top:10px">Переназначить</button>
@@ -734,10 +940,11 @@ function leadScreen(){
     <button class="btn ghost" data-edit>Изменить карточку</button>
     ${isAdmin()?`<button class="btn warn" data-del>Удалить лид</button>`:''}`;
   // Главное действие закреплено над навигацией, чтобы не листать карточку после звонка
-  const dock=`<div class="dock">
+  const dock=`<div class="dock three">
     ${l.primary_phone
       ? `<a class="dcall" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`
       : `<span class="dcall" disabled>${IC.phone}</span>`}
+    <button class="dscript" data-script>Скрипт</button>
     <button class="btn" data-touch>Записать касание</button>
   </div>`;
 
@@ -757,6 +964,7 @@ function ev(a){
 }
 
 /* ── ЛИСТ КАСАНИЯ ── */
+let lastTouchArgs=null;
 function touchSheet(){
   const l=S.lead;
   const clientId=uuid();
@@ -900,19 +1108,27 @@ function touchSheet(){
     try{
       // Контакт, лид и запись в журнал — одна транзакция в базе. Если упадёт
       // правило (нет даты, нет причины), не останется ни касания, ни полустатуса.
-      const r = await rpc('log_touch', {
+      const r = await rpc('log_touch', lastTouchArgs = {
         client_id:clientId, lead_id:S.lead.id,
         channel:gv('ch'), outcome:gv('oc'), status,
         with_dm:d.querySelector('#wdm').checked, comment:cm||null,
         next_action_at:patch.next_action_at, next_action:patch.next_action,
         lost_reason:patch.lost_reason||null, tariff:patch.tariff,
         contact: hasNc ? {name:nc.name||null, position:nc.position||null,
-                          phone:nc.phone, phone_raw:nc.raw||null, dm:nc.dm} : null });
+                          phone:nc.phone, phone_raw:nc.raw||null, dm:nc.dm} : null,
+        script_id:S.callScript?.script_id||null, objection_id:S.callScript?.objection_id||null });
       d.remove(); await openLead(S.lead.id, false);
       if(r?.auto_closed) toast('Записано. Пять недозвонов подряд — лид закрыт',
         false, {label:'Следующий →', fn:nextLead});
       else toast('Записано', false, {label:'Следующий →', fn:nextLead});
-    }catch(e){ toast(e.message,true); btn.disabled=false; btn.textContent='Сохранить'; }
+    }catch(e){
+      if(isOffline(e)){
+        queueAdd({args:lastTouchArgs});
+        d.remove(); toast('Нет связи. Касание сохранено на телефоне, отправлю, как появится сеть');
+        render(); return;
+      }
+      toast(e.message,true); btn.disabled=false; btn.textContent='Сохранить';
+    }
   };
 }
 
@@ -1110,14 +1326,411 @@ async function saveLead(){
   }
 }
 
+/* ── СКРИПТ В ЗВОНКЕ ── */
+// Скрипт этапа: сначала для сегмента лида, иначе общий. Возражения общие.
+function pickScript(stage, lead){
+  const list=S.scripts.filter(x=>x.kind==='script' && x.active && x.stage===stage);
+  return list.find(x=>x.segment && lead?.segment && x.segment.toLowerCase()===lead.segment.toLowerCase())
+      || list.find(x=>!x.segment) || list[0] || null;
+}
+function scriptSheet(lead, initialStage){
+  const d=document.createElement('div'); d.className='sheet';
+  let stage = initialStage || STAGE_BY_STATUS[lead?.status] || 'first_call';
+  const objections=S.scripts.filter(x=>x.kind==='objection' && x.active);
+  const draw=()=>{
+    const sc=pickScript(stage, lead);
+    if(lead) S.callScript = { script_id: sc?.id||null, objection_id: S.callScript?.objection_id||null };
+    d.innerHTML=`<div class="inner"><div class="grab"></div>
+      <h2 style="margin:0 0 4px;font-size:19px">Скрипт</h2>
+      <p style="margin:0 0 10px;color:var(--muted);font-size:13.5px">${lead?esc(lead.company_name):'Общий вид без подстановок'}</p>
+      <div class="chips">${Object.entries(STAGE).map(([k,v])=>`<button class="chip ${k===stage?'on':''}" data-st="${k}">${v}</button>`).join('')}</div>
+      <div class="txt">${sc ? fmt(sc.body, lead) : '<p style="color:var(--dim)">Для этого этапа скрипта пока нет. Админ добавит во вкладке «Команда».</p>'}</div>
+      ${objections.length?`<h3 style="margin:14px 0 4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Возражения</h3>
+      ${objections.map(o=>`<div class="obj ${S.callScript?.objection_id===o.id?'open':''}" data-obj="${o.id}"><button type="button">${esc(o.title)}</button>
+        <div class="ans txt">${fmt(o.body, lead)}</div></div>`).join('')}`:''}
+      <button class="btn ghost" id="sc_close">Закрыть</button>
+    </div>`;
+    d.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>{ stage=b.dataset.st; draw(); });
+    d.querySelectorAll('.obj button').forEach(b=>b.onclick=()=>{
+      const o=b.parentElement; const open=!o.classList.contains('open');
+      d.querySelectorAll('.obj').forEach(x=>x.classList.remove('open'));
+      if(open){ o.classList.add('open'); if(lead) S.callScript.objection_id=o.dataset.obj; }
+      else if(lead) S.callScript.objection_id=null;
+    });
+    d.querySelector('#sc_close').onclick=()=>d.remove();
+  };
+  draw();
+  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  document.body.appendChild(d);
+}
+
+/* ── УЧЁБА ── */
+async function loadLearn(light){
+  const [scripts, lessons, progress] = await Promise.all([
+    light ? S.scripts : db('scripts?select=*&order=sort_order'),
+    db('lessons?select=*&order=module,sort_order'),
+    db(`lesson_progress?profile_id=eq.${S.prof.id}&select=*`) ]);
+  S.scripts=scripts; S.lessons=lessons; S.progress=progress;
+}
+const passedSet = ()=> new Set(S.progress.map(x=>x.lesson_id));
+// Первый непройденный урок: сначала те, у которых срок по неделе разгона ближе
+function nextLesson(){
+  const done=passedSet();
+  return S.lessons.filter(l=>l.active && !done.has(l.id))
+    .sort((a,b)=>(a.due_week??99)-(b.due_week??99) || a.sort_order-b.sort_order)[0] || null;
+}
+function lessonOfDay(){
+  if(isAdmin()) return '';
+  const l=nextLesson(); if(!l) return '';
+  const week=S.plan?.week;
+  const late = l.due_week && week && week>l.due_week;
+  return `<button class="notice" data-lesson="${l.id}" style="${late?'':'border-color:var(--line);background:var(--surface)'}">
+    <span><b style="${late?'':'color:var(--accent)'}">Урок дня</b> ${esc(l.title)}${l.due_week?`<i style="display:block;font-style:normal;font-size:12px;color:var(--dim)">${late?'просрочен: ':'пройти '}до ${l.due_week}-й недели</i>`:''}</span>
+    <span class="go" style="${late?'':'color:var(--accent)'}">Открыть</span></button>`;
+}
+
+function learnScreen(){
+  const adm=isAdmin();
+  const head=`<div class="topbar"><h1>${adm?'Скрипты и уроки':'Учёба'}<span class="sub">${adm?'редактируется с телефона, без выкладки файла':'скрипты, возражения, уроки'}</span></h1></div>`;
+  if(S.busy) return head+`<div class="spin"></div>`;
+  const done=passedSet();
+  const item=(x,label)=>`<button class="link" data-open-script="${x.id}" style="${!x.active?'color:var(--dim)':''}">
+    <span>${esc(x.title)}<span class="cnt" style="margin-left:8px">${label}${!x.active?' · выключен':''}</span></span></button>`;
+  const scripts=S.scripts.filter(x=>x.kind==='script'), objs=S.scripts.filter(x=>x.kind==='objection');
+  const byStage=Object.keys(STAGE).flatMap(st=>scripts.filter(x=>x.stage===st).map(x=>item(x, STAGE[st]+(x.segment?' · '+x.segment:''))));
+  const lessons=Object.keys(MODULE).map(m=>{
+    const ls=S.lessons.filter(l=>l.module===m); if(!ls.length) return '';
+    return `<p class="dmhead" style="margin:10px 0 2px">${MODULE[m]}</p>`+ls.map(l=>`<button class="link" data-lesson="${l.id}" style="${!l.active?'color:var(--dim)':''}">
+      <span>${done.has(l.id)?'✓ ':''}${esc(l.title)}<span class="cnt" style="margin-left:8px">${l.due_week?'до '+l.due_week+'-й нед.':''}${!l.active?' · выключен':''}</span></span></button>`).join('');
+  }).join('');
+  return head+`<div class="wrap">
+    <div class="card"><h3>Скрипты по этапам</h3>${byStage.join('')||'<p class="note" style="margin:0">Пока нет</p>'}
+      ${adm?`<button class="btn ghost" data-new-script="script">Добавить скрипт</button>`:''}</div>
+    <div class="card"><h3>Возражения</h3>${objs.map(x=>item(x,'')).join('')||'<p class="note" style="margin:0">Пока нет</p>'}
+      ${adm?`<button class="btn ghost" data-new-script="objection">Добавить возражение</button>`:''}</div>
+    <div class="card"><h3>Уроки · пройдено ${[...done].filter(id=>S.lessons.some(l=>l.id===id)).length} из ${S.lessons.filter(l=>l.active).length}</h3>${lessons||'<p class="note" style="margin:0">Пока нет</p>'}
+      ${adm?`<button class="btn ghost" data-new-lesson>Добавить урок</button>`:''}</div>
+  </div>`;
+}
+
+// Редактор скрипта или возражения. Только админ.
+function scriptEditor(x){
+  const isNew=!x; x=x||{kind:'script',stage:'first_call',active:true,sort_order:10,title:'',body:'',segment:''};
+  const d=document.createElement('div'); d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 6px;font-size:19px">${isNew?'Новый':'Изменить'}</h2>
+    <label for="se_kind">Тип</label>
+    <select id="se_kind"><option value="script" ${x.kind==='script'?'selected':''}>Скрипт этапа</option>
+      <option value="objection" ${x.kind==='objection'?'selected':''}>Возражение</option></select>
+    <div id="se_stage_box">
+      <label for="se_stage">Этап</label>
+      <select id="se_stage">${Object.entries(STAGE).map(([k,v])=>`<option value="${k}" ${x.stage===k?'selected':''}>${v}</option>`).join('')}</select>
+      <label for="se_seg">Сегмент (пусто = для всех)</label>
+      <input id="se_seg" type="text" value="${esc(x.segment||'')}" placeholder="Общепит" list="segs">
+    </div>
+    <label for="se_title">${x.kind==='objection'?'Реплика клиента':'Название'}</label>
+    <input id="se_title" type="text" value="${esc(x.title)}">
+    <label for="se_body">${x.kind==='objection'?'Ответ':'Текст'}</label>
+    <textarea id="se_body" style="min-height:220px">${esc(x.body)}</textarea>
+    <p class="note">Пустая строка делит абзацы, «- » в начале строки — пункт, **жирный**.
+    Подстановки: {компания}, {лпр}, {тариф}, {внедрение}, {подписка}.</p>
+    <div class="two"><div><label for="se_order">Порядок</label><input id="se_order" type="number" inputmode="numeric" value="${x.sort_order}"></div>
+      <div><label>&nbsp;</label><label class="check" style="padding:12px 0"><input type="checkbox" id="se_active" ${x.active?'checked':''}> Активен</label></div></div>
+    <button class="btn" id="se_save">Сохранить</button>
+    ${isNew?'':`<button class="btn warn" id="se_del">Удалить</button>`}
+    <button class="btn ghost" id="se_cancel">Отмена</button>
+  </div>`;
+  document.body.appendChild(d);
+  const kind=d.querySelector('#se_kind'), box=d.querySelector('#se_stage_box');
+  const sync=()=>{ box.style.display = kind.value==='script'?'block':'none'; };
+  kind.onchange=sync; sync();
+  d.querySelector('#se_cancel').onclick=()=>d.remove();
+  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  d.querySelector('#se_save').onclick=async()=>{
+    const body={ kind:kind.value, stage: kind.value==='script'?d.querySelector('#se_stage').value:null,
+      segment: kind.value==='script'?(d.querySelector('#se_seg').value.trim()||null):null,
+      title:d.querySelector('#se_title').value.trim(), body:d.querySelector('#se_body').value,
+      sort_order:+d.querySelector('#se_order').value||0, active:d.querySelector('#se_active').checked };
+    if(!body.title) return toast('Впиши название',true);
+    try{
+      if(isNew) await db('scripts',{method:'POST',prefer:'return=minimal',body:JSON.stringify(body)});
+      else await db(`scripts?id=eq.${x.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
+      d.remove(); toast('Сохранено'); S.scripts=[]; go('learn',false);
+    }catch(e){ toast(e.message,true); }
+  };
+  const del=d.querySelector('#se_del');
+  if(del) del.onclick=async()=>{
+    if(!confirm('Удалить? В журнале касаний ссылка на него очистится.')) return;
+    try{ await db(`scripts?id=eq.${x.id}`,{method:'DELETE',prefer:'return=minimal'});
+      d.remove(); toast('Удалено'); S.scripts=[]; go('learn',false); }catch(e){ toast(e.message,true); }
+  };
+}
+
+/* ── УРОК ── */
+function lessonScreen(){
+  const l=S.lesson; if(!l) return '';
+  const head=`<div class="topbar"><button class="back" data-back>‹</button>
+    <h1>${esc(l.title)}<span class="sub">${MODULE[l.module]}${l.due_week?' · пройти до '+l.due_week+'-й недели':''}</span></h1></div>`;
+  const qs=Array.isArray(l.questions)?l.questions:[];
+  const passed=passedSet().has(l.id);
+  return head+`<div class="wrap">
+    ${passed?'<p class="badge2 go" style="margin-bottom:12px">Урок пройден</p>':''}
+    <div class="txt">${fmt(l.body)}</div>
+    ${qs.length?`<h3 style="margin:18px 0 4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Проверь себя</h3>
+    ${qs.map((q,i)=>`<div class="q" data-q="${i}"><div class="qt">${i+1}. ${esc(q.q)}</div>
+      ${(q.options||[]).map((o,j)=>`<label class="opt"><input type="radio" name="q${i}" value="${j}"> ${esc(o)}</label>`).join('')}
+      <div class="hint" hidden></div></div>`).join('')}
+    <button class="btn" id="ls_check">Проверить</button>`:''}
+    ${isAdmin()?`<button class="btn ghost" id="ls_edit">Изменить урок</button>`:''}
+  </div>`;
+}
+
+// Вопросы в редакторе — простым текстом, чтобы править с телефона:
+//   В: текст вопроса
+//   - вариант
+//   - *правильный вариант
+//   П: подсказка (абзац из урока)
+function questionsToText(qs){
+  return (qs||[]).map(q=>[`В: ${q.q}`, ...(q.options||[]).map((o,j)=>`- ${j===q.correct?'*':''}${o}`), q.hint?`П: ${q.hint}`:''].filter(Boolean).join('\n')).join('\n\n');
+}
+function textToQuestions(t){
+  const out=[]; let cur=null;
+  for(const raw of String(t||'').split('\n')){
+    const line=raw.trim(); if(!line) continue;
+    if(/^В:/i.test(line)){ cur={q:line.slice(2).trim(),options:[],correct:0,hint:''}; out.push(cur); }
+    else if(!cur) continue;
+    else if(/^П:/i.test(line)) cur.hint=line.slice(2).trim();
+    else if(/^-/.test(line)){ let o=line.slice(1).trim(); if(o.startsWith('*')){ cur.correct=cur.options.length; o=o.slice(1).trim(); } cur.options.push(o); }
+  }
+  return out.filter(q=>q.q && q.options.length>=2);
+}
+function lessonEditor(l){
+  const isNew=!l; l=l||{module:'sales',title:'',body:'',questions:[],sort_order:10,due_week:null,active:true};
+  const d=document.createElement('div'); d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 6px;font-size:19px">${isNew?'Новый урок':'Изменить урок'}</h2>
+    <label for="le_module">Модуль</label>
+    <select id="le_module">${Object.entries(MODULE).map(([k,v])=>`<option value="${k}" ${l.module===k?'selected':''}>${v}</option>`).join('')}</select>
+    <label for="le_title">Название</label>
+    <input id="le_title" type="text" value="${esc(l.title)}">
+    <label for="le_body">Текст</label>
+    <textarea id="le_body" style="min-height:220px">${esc(l.body)}</textarea>
+    <label for="le_q">Вопросы</label>
+    <textarea id="le_q" style="min-height:180px;font-family:var(--mono);font-size:13.5px" placeholder="В: вопрос&#10;- вариант&#10;- *правильный&#10;П: подсказка">${esc(questionsToText(l.questions))}</textarea>
+    <p class="note">«В:» вопрос, «- » вариант, звёздочка перед правильным, «П:» подсказка, которая покажется при ошибке.</p>
+    <div class="two"><div><label for="le_due">Пройти до недели</label><input id="le_due" type="number" inputmode="numeric" value="${l.due_week??''}" placeholder="—"></div>
+      <div><label for="le_order">Порядок</label><input id="le_order" type="number" inputmode="numeric" value="${l.sort_order}"></div></div>
+    <label class="check"><input type="checkbox" id="le_active" ${l.active?'checked':''}> Активен</label>
+    <button class="btn" id="le_save">Сохранить</button>
+    ${isNew?'':`<button class="btn warn" id="le_del">Удалить</button>`}
+    <button class="btn ghost" id="le_cancel">Отмена</button>
+  </div>`;
+  document.body.appendChild(d);
+  d.querySelector('#le_cancel').onclick=()=>d.remove();
+  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  d.querySelector('#le_save').onclick=async()=>{
+    const due=d.querySelector('#le_due').value.trim();
+    const body={ module:d.querySelector('#le_module').value, title:d.querySelector('#le_title').value.trim(),
+      body:d.querySelector('#le_body').value, questions:textToQuestions(d.querySelector('#le_q').value),
+      due_week: due?+due:null, sort_order:+d.querySelector('#le_order').value||0, active:d.querySelector('#le_active').checked };
+    if(!body.title) return toast('Впиши название',true);
+    try{
+      if(isNew) await db('lessons',{method:'POST',prefer:'return=minimal',body:JSON.stringify(body)});
+      else await db(`lessons?id=eq.${l.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
+      d.remove(); toast('Сохранено'); S.lesson=null; go('learn');
+    }catch(e){ toast(e.message,true); }
+  };
+  const del=d.querySelector('#le_del');
+  if(del) del.onclick=async()=>{
+    if(!confirm('Удалить урок вместе с прогрессом по нему?')) return;
+    try{ await db(`lessons?id=eq.${l.id}`,{method:'DELETE',prefer:'return=minimal'});
+      d.remove(); toast('Удалено'); S.lesson=null; go('learn'); }catch(e){ toast(e.message,true); }
+  };
+}
+
+/* ── ЗАМЕЧАНИЯ НАСТАВНИКА ── */
+function noteSheet(activityId){
+  const a=S.personData?.acts.find(x=>x.id===activityId);
+  const d=document.createElement('div'); d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 4px;font-size:19px">Замечание</h2>
+    <p style="margin:0 0 6px;color:var(--muted);font-size:13.5px">${esc(S.person.name)} · ${a?esc(a.company_name)+' · '+human(a.created_at):''}</p>
+    ${a?.comment?`<p class="note" style="margin:0 0 6px">«${esc(a.comment)}»</p>`:''}
+    <label for="cn_text">Что сделать иначе</label>
+    <textarea id="cn_text" placeholder="Коротко и по делу"></textarea>
+    <button class="btn" id="cn_save">Отправить</button>
+    <button class="btn ghost" id="cn_cancel">Отмена</button>
+  </div>`;
+  document.body.appendChild(d);
+  d.querySelector('#cn_cancel').onclick=()=>d.remove();
+  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  d.querySelector('#cn_save').onclick=async()=>{
+    const text=d.querySelector('#cn_text').value.trim(); if(!text) return toast('Напиши замечание',true);
+    try{ await db('coaching_notes',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
+        {to_id:S.person.id, activity_id:activityId, text})});
+      d.remove(); toast('Отправлено'); go('person',false);
+    }catch(e){ toast(e.message,true); }
+  };
+}
+
+async function notesSheet(){
+  const ids=[...new Set(S.notes.map(n=>n.lead_id).filter(Boolean))];
+  let names=new Map();
+  try{ if(ids.length) names=new Map((await db(`v_leads?id=in.(${ids.join(',')})&select=id,company_name`)).map(l=>[l.id,l.company_name])); }catch{}
+  const d=document.createElement('div'); d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 10px;font-size:19px">Наставник</h2>
+    ${S.notes.map(n=>`<div class="ev" style="padding:10px 0;border-bottom:1px solid var(--line)">
+      <div class="h">${esc(names.get(n.lead_id)||'')}<span style="color:var(--dim);font-weight:400"> · ${human(n.created_at)}</span></div>
+      <div class="c" style="color:var(--text)">${esc(n.text)}</div>
+      <div class="chips" style="padding-top:8px">${n.lead_id?`<button class="chip" data-nlead="${n.lead_id}">Открыть лид</button>`:''}
+        <button class="chip on" data-nread="${n.id}">Понял</button></div></div>`).join('')}
+    <button class="btn ghost" id="cn_close">Закрыть</button>
+  </div>`;
+  document.body.appendChild(d);
+  d.querySelector('#cn_close').onclick=()=>d.remove();
+  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  d.querySelectorAll('[data-nread]').forEach(b=>b.onclick=async()=>{
+    try{ await db(`coaching_notes?id=eq.${b.dataset.nread}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({read_at:new Date().toISOString()})});
+      S.notes=S.notes.filter(n=>n.id!==b.dataset.nread); d.remove(); if(S.notes.length) notesSheet(); else render();
+    }catch(e){ toast(e.message,true); }
+  });
+  d.querySelectorAll('[data-nlead]').forEach(b=>b.onclick=()=>{ d.remove(); openLead(b.dataset.nlead); });
+}
+
+/* ── КОМАНДА ── */
+function teamScreen(){
+  const head=`<div class="topbar"><h1>Команда<span class="sub">${S.team.length} чел. · сегодня</span></h1></div>`;
+  if(S.busy) return head+`<div class="spin"></div>`;
+  const sum=k=>S.team.reduce((a,t)=>a+(+t[k]||0),0);
+  const stats=`<div class="stats">
+    <div class="stat"><b>${sum('calls')}</b><span>Звонков</span></div>
+    <div class="stat"><b>${sum('talks')}</b><span>Разговоров</span></div>
+    <div class="stat"><b>${sum('dm_talks')}</b><span>Выходов на ЛПР</span></div>
+    <div class="stat"><b>${sum('taken')}</b><span>Взяли в работу</span></div>
+  </div>`;
+  const off = S.staff.filter(u=>!u.active);
+  const people=`<div class="card"><h3>Люди</h3>
+    ${S.team.map(personRow).join('')}
+    ${off.map(u=>personRow({profile_id:u.id,name:u.name,role:u.role})).join('')}
+  </div>`;
+  const inv=`<div class="card"><h3>Приглашения</h3>
+    ${S.invites.map(i=>`<div class="inv"><span class="em">${esc(i.email)}<i>${esc(i.name)} · ${ROLE[i.role]}</i></span>
+      <button class="x" data-inv-del="${i.id}" aria-label="Удалить">×</button></div>`).join('')}
+    <label for="iv_email">Почта</label>
+    <input id="iv_email" type="email" inputmode="email" autocapitalize="off" placeholder="имя@пример.ru">
+    <label for="iv_name">Имя</label>
+    <input id="iv_name" type="text" placeholder="Как зовут">
+    <label for="iv_role">Роль</label>
+    <select id="iv_role"><option value="manager">Менеджер</option><option value="admin">Администратор</option></select>
+    <button class="btn ghost" id="iv_send" style="margin-top:12px">Пригласить</button>
+    <p class="note">Человек регистрируется на экране входа с этой почтой и сразу получает доступ.
+    Если аккаунт уже заведён в Supabase, доступ выдаётся сразу.</p>
+  </div>`;
+  const links=`<div class="card">
+    <button class="link" data-nav="norms">Нормы плана и разгон</button>
+    <button class="link" data-nav="learn"><span>Скрипты, возражения, уроки<span class="cnt" style="margin-left:8px">${S.scripts.length+S.lessons.length||''}</span></span></button>
+    <button class="link" data-nav="report">Отчёт</button>
+    <button class="link" data-nav="imp">Загрузить лиды из таблицы</button>
+    <button class="link" id="exp">Выгрузить всё в Excel</button>
+  </div>`;
+  return head+`<div class="wrap">${stats}${people}${inv}${links}</div>`;
+}
+
+async function loadPerson(){
+  const p=S.person; if(!p) return;
+  const [team, plans, prog, acts, notes] = await Promise.all([
+    db(`v_team_today?profile_id=eq.${p.id}&select=*`),
+    db(`plans?profile_id=eq.${p.id}&month=eq.${monthKey()}&select=*`),
+    db(`lesson_progress?profile_id=eq.${p.id}&select=*`),
+    db(`activities?author_id=eq.${p.id}&channel=neq.system&select=*&order=created_at.desc&limit=10`),
+    db(`coaching_notes?to_id=eq.${p.id}&select=*&order=created_at.desc&limit=20`),
+  ]);
+  if(!S.lessons.length) S.lessons = await db('lessons?select=*&order=module,sort_order');
+  const ids=[...new Set(acts.map(a=>a.lead_id))];
+  const leads = ids.length ? await db(`v_leads?id=in.(${ids.join(',')})&select=id,company_name`) : [];
+  const nm=new Map(leads.map(l=>[l.id,l.company_name]));
+  acts.forEach(a=>a.company_name=nm.get(a.lead_id)||'—');
+  S.personData={ today:team[0]||null, plan:plans[0]||null, progress:prog, acts, notes };
+}
+
+function personScreen(){
+  const p=S.person, d=S.personData; if(!p) return '';
+  const head=`<div class="topbar"><button class="back" data-back>‹</button>
+    <h1>${esc(p.name)}<span class="sub">${ROLE[p.role]}${p.active?'':' · доступ выключен'}</span></h1></div>`;
+  if(S.busy||!d) return head+`<div class="spin"></div>`;
+  const me = p.id===S.prof.id;
+  const access=`<div class="card"><h3>Доступ и разгон</h3>
+    <label for="ps_start">Дата выхода</label>
+    <input id="ps_start" type="date" value="${p.started_at||''}">
+    <label class="check"><input type="checkbox" id="ps_ramp" ${p.ramp_enabled?'checked':''}> Разгон новичка по неделям</label>
+    <label for="ps_role">Роль</label>
+    <select id="ps_role" ${me?'disabled':''}><option value="manager" ${p.role==='manager'?'selected':''}>Менеджер</option>
+      <option value="admin" ${p.role==='admin'?'selected':''}>Администратор</option></select>
+    <button class="btn ghost" id="ps_save" style="margin-top:12px">Сохранить</button>
+    ${me?'':p.active?`<button class="btn warn" id="ps_off">Отключить доступ</button>`
+                    :`<button class="btn" id="ps_on">Включить доступ</button>`}
+  </div>`;
+  const today = d.today ? planBlock(d.today, 0, true) : '';
+  const pl=d.plan||{};
+  const F=[['calls_day','Звонки в день'],['talks_day','Разговоры в день'],['dm_talks_day','ЛПР в день'],
+           ['briefs_week','Брифы в неделю'],['proposals_week','КП в неделю'],['won_month','Сделки в месяц'],['cash_month','Деньги в месяц, ₽']];
+  const plan=`<div class="card"><h3>Личный план · ${monthName(monthKey())}</h3>
+    <p class="note" style="margin:0 0 6px">${d.plan?'Задан личный план: нормы и разгон не участвуют.':'Личного плана нет: действуют нормы и разгон.'}</p>
+    <div class="two">${F.map(([k,t])=>`<div><label for="pp_${k}">${t}</label>
+      <input id="pp_${k}" type="number" inputmode="numeric" value="${pl[k]??''}" placeholder="${d.today?.[k]??''}"></div>`).join('')}</div>
+    <button class="btn ghost" id="pp_save" style="margin-top:12px">Сохранить план</button>
+    ${d.plan?`<button class="btn ghost" id="pp_del">Убрать личный план</button>`:''}
+  </div>`;
+  const passed=new Set(d.progress.map(x=>x.lesson_id));
+  const lessons=`<div class="card"><h3>Уроки · ${passed.size} из ${S.lessons.filter(l=>l.active).length}</h3>
+    ${S.lessons.filter(l=>l.active).map(l=>`<div class="kv"><dt>${esc(l.title)}</dt>
+      <dd>${passed.has(l.id)?'<span class="badge2 go">пройден</span>':l.due_week?`<span class="badge2">до ${l.due_week}-й недели</span>`:'<span class="badge2">не пройден</span>'}</dd></div>`).join('')
+      || '<p class="note" style="margin:0">Уроков пока нет</p>'}
+  </div>`;
+  const acts=`<div class="card"><h3>Последние касания</h3>
+    ${d.acts.length ? `<div class="log">${d.acts.map(a=>`<div class="ev ${a.outcome==='answered'?'ok':(a.outcome==='no_answer'||a.outcome==='refused')?'bad':''}">
+      <div class="h">${esc(a.company_name)} · ${CHAN[a.channel]} · ${OUT[a.outcome]||''}</div>
+      <div class="t">${new Date(a.created_at).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+      ${a.comment?`<div class="c">${esc(a.comment)}</div>`:''}
+      <button class="chip" style="margin-top:6px" data-note="${a.id}">Замечание</button></div>`).join('')}</div>`
+      : '<p class="note" style="margin:0">Касаний ещё не было</p>'}
+  </div>`;
+  const notes = d.notes.length ? `<div class="card"><h3>Замечания наставника</h3>
+    ${d.notes.map(n=>`<div class="ev"><div class="c" style="color:var(--text)">${esc(n.text)}</div>
+      <div class="t">${human(n.created_at)} · ${n.read_at?'прочитано':'не прочитано'}</div></div>`).join('')}</div>` : '';
+  return head+`<div class="wrap">${access}${today}${plan}${lessons}${acts}${notes}</div>`;
+}
+
+function normsScreen(){
+  const head=`<div class="topbar"><button class="back" data-back>‹</button><h1>Нормы плана и разгон</h1></div>`;
+  if(S.busy||!S.defaults) return head+`<div class="spin"></div>`;
+  const d=S.defaults;
+  const F=[['calls_day','Звонки в день'],['talks_day','Разговоры в день'],['dm_talks_day','ЛПР в день'],
+           ['briefs_week','Брифы в неделю'],['proposals_week','КП в неделю'],['won_month','Сделки в месяц'],['cash_month','Деньги в месяц, ₽']];
+  return head+`<div class="wrap">
+    <div class="card"><h3>Нормы по умолчанию</h3>
+      <div class="two">${F.map(([k,t])=>`<div><label for="nd_${k}">${t}</label>
+        <input id="nd_${k}" type="number" inputmode="numeric" value="${d[k]}"></div>`).join('')}</div>
+    </div>
+    <div class="card"><h3>Разгон новичка, % от нормы</h3>
+      <div class="two">${S.ramp.map(r=>`<div><label for="rs_${r.week}">${r.week}-я неделя</label>
+        <input id="rs_${r.week}" type="number" inputmode="numeric" min="0" max="100" value="${r.pct}" data-week="${r.week}"></div>`).join('')}</div>
+      <button class="btn ghost" id="rs_add" style="margin-top:12px">Добавить неделю</button>
+      <p class="note" id="rs_prev"></p>
+    </div>
+    <button class="btn" id="nd_save">Сохранить</button>
+    <p class="note">Дальше последней недели разгона норма 100%. Разгон считается от даты выхода в карточке сотрудника.</p>
+  </div>`;
+}
+
 /* ── ЕЩЁ ── */
 function moreScreen(){
   return `<div class="topbar"><h1>Ещё<span class="sub">${esc(S.prof.name)} · ${
     isAdmin()?'администратор':'менеджер'}</span></h1></div>
   <div class="wrap">
-    ${isAdmin()?`
-    <button class="btn ghost" data-nav="imp">Загрузить лиды из таблицы</button>
-    <button class="btn ghost" id="exp">Выгрузить всё в Excel</button>`:''}
+    <button class="btn ghost" data-nav="report">Отчёт</button>
+    ${isAdmin()?`<button class="btn ghost" id="exp">Выгрузить всё в Excel</button>`:''}
     <button class="btn ghost" id="reload">Обновить данные</button>
     <button class="btn warn" id="out">Выйти</button>
     <p class="note">Balance CRM · данные хранятся в Supabase, доступ по ролям.
@@ -1165,6 +1778,7 @@ async function exportAll(){
     a.download=`balance-crm-${iso(new Date())}.csv`;
     a.click(); URL.revokeObjectURL(a.href);
     toast(`Выгружено ${rows.length} записей`);
+    LS.set('exp-'+monthKey().slice(0,7), true);
   }catch(e){ toast(e.message,true); }
 }
 
@@ -1356,10 +1970,20 @@ function periodRange(kind){
 
 async function loadReport(){
   const {from,to,kind}=periodRange(S.period);
-  const [acts, leads] = await Promise.all([
+  const [acts, leads, team] = await Promise.all([
     db(`activities?created_at=gte.${from}&created_at=lt.${to}&select=*&order=created_at`),
-    db('v_leads?select=*')
+    db('v_leads?select=*'),
+    isAdmin() ? db('v_team_today?select=*') : db('v_plan_today?select=*')
   ]);
+  // Строка плана только для «сегодня»: план задаётся на день
+  let planLine=null;
+  if(kind==='today'){
+    const rows = S.repWho==='all' ? team : team.filter(t=>t.profile_id===S.repWho);
+    if(rows.length){
+      const sum=k=>rows.reduce((a,t)=>a+(+t[k]||0),0);
+      planLine=`План: звонки ${sum('calls')}/${sum('calls_day')} · разговоры ${sum('talks')}/${sum('talks_day')} · ЛПР ${sum('dm_talks')}/${sum('dm_talks_day')}`;
+    }
+  }
   const byLead=new Map(leads.map(l=>[l.id,l]));
   const who=S.repWho;
   const mine=a=>who==='all' || a.author_id===who;
@@ -1409,7 +2033,7 @@ async function loadReport(){
     won:won.length, lost:lost.length,
     setupSum:won.reduce((s,l)=>s+(l.setup_amount||0),0),
     mrrSum:won.reduce((s,l)=>s+(l.mrr_amount||0),0),
-    dmTouch, dmLeads, lostBy, cash, cashTotal,
+    dmTouch, dmLeads, lostBy, cash, cashTotal, planLine,
     pipeline:leads.filter(l=>leadMine(l)&&['proposal_sent','negotiation'].includes(l.status))
                   .reduce((s,l)=>s+(l.mrr_amount||0),0)
   };
@@ -1451,6 +2075,7 @@ function reportSVG(r){
     tx(x+bw/2,y+82,l,{s:14,c:T.mut,a:'middle'});
   });
   y+=124;
+  if(r.planLine){ tx(32,y+2,r.planLine,{s:14,c:T.mut,m:true}); y+=26; }
 
   // каналы
   const ch=[['Звонки',r.call],['WhatsApp',r.wa],['Instagram',r.ig],['Встречи',r.meet]];
@@ -1536,7 +2161,7 @@ function reportScreen(){
       .map(([k,v])=>`<button class="chip ${S.period===k?'on':''}" data-p="${k}">${v}</button>`).join('')}</div>
     ${isAdmin()&&S.staff.length>1?`<div class="chips">
       <button class="chip ${S.repWho==='all'?'on':''}" data-w="all">Вся команда</button>
-      ${S.staff.map(u=>`<button class="chip ${S.repWho===u.id?'on':''}" data-w="${u.id}">${
+      ${S.staff.filter(u=>u.active).map(u=>`<button class="chip ${S.repWho===u.id?'on':''}" data-w="${u.id}">${
         esc(u.name)}</button>`).join('')}</div>`:''}
   </div>`;
   if(S.busy||!S.report) return head+chips+`<div class="spin"></div>`;
@@ -1573,13 +2198,16 @@ function navBar(){
   const n=(k,ic,t,b)=>`<button data-nav="${k}" class="${S.view===k?'on':''}">
     <span class="ic">${ic}</span>${t}${b?`<span class="badge">${b}</span>`:''}</button>`;
   const over=(S.stats?.overdue||0)+(S.stats?.due_today||0);
+  // Четвёртая вкладка зависит от роли: менеджеру учёба, админу команда
+  const four = isAdmin() ? n('team','⚇','Команда') : n('learn','▤','Учёба', S.notes.length||0);
+  const on = ['person','norms'].includes(S.view) ? 'team' : S.view==='lesson' ? 'learn' : S.view;
   return `<nav class="nav">
     ${n('today','◉','Сегодня',over)}
     ${n('list','☰','Лиды')}
     ${n('add','＋','Добавить')}
-    ${n('report','▤','Отчёт')}
+    ${four}
     ${n('more','⋯','Ещё')}
-  </nav>`;
+  </nav>`.replace(`data-nav="${on}" class=""`, `data-nav="${on}" class="on"`);
 }
 
 function bind(){
@@ -1627,6 +2255,126 @@ function bind(){
     }catch(e){ if(e.name!=='AbortError') toast(e.message,true); }
     shr.disabled=false; shr.textContent='Отправить';
   };
+
+  document.querySelectorAll('[data-person]').forEach(b=>b.onclick=()=>{
+    S.person = S.staff.find(u=>u.id===b.dataset.person) || S.team.find(t=>t.profile_id===b.dataset.person) && {id:b.dataset.person, ...S.team.find(t=>t.profile_id===b.dataset.person)};
+    S.personData=null; go('person');
+  });
+  document.querySelectorAll('[data-inv-del]').forEach(b=>b.onclick=async()=>{
+    try{ await db(`invites?id=eq.${b.dataset.invDel}`,{method:'DELETE',prefer:'return=minimal'});
+      toast('Приглашение удалено'); go('team'); }catch(e){ toast(e.message,true); }
+  });
+  const ivs=document.getElementById('iv_send');
+  if(ivs) ivs.onclick=async()=>{
+    const email=document.getElementById('iv_email').value.trim().toLowerCase();
+    const name=document.getElementById('iv_name').value.trim();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Проверь почту',true);
+    if(!name) return toast('Впиши имя',true);
+    ivs.disabled=true;
+    try{
+      await db('invites',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
+        {email, name, role:document.getElementById('iv_role').value, invited_by:S.prof.id})});
+      const n=await rpc('apply_invites',{});
+      toast(n>0 ? 'Аккаунт уже был: доступ выдан сразу' : 'Приглашение создано. Пусть регистрируется с этой почтой');
+      go('team');
+    }catch(e){ toast(e.message.includes('duplicate')?'Открытое приглашение на эту почту уже есть':e.message,true); ivs.disabled=false; }
+  };
+
+  const pss=document.getElementById('ps_save');
+  if(pss) pss.onclick=async()=>{
+    const patch={ started_at:document.getElementById('ps_start').value||null,
+      ramp_enabled:document.getElementById('ps_ramp').checked };
+    const role=document.getElementById('ps_role').value;
+    if(S.person.id!==S.prof.id) patch.role=role;
+    try{ await db(`profiles?id=eq.${S.person.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(patch)});
+      Object.assign(S.person, patch); toast('Сохранено'); go('person',false);
+    }catch(e){ toast(e.message,true); }
+  };
+  const toggleAccess=async(on)=>{
+    if(!on && !confirm(`Отключить доступ: ${S.person.name}? История касаний останется.`)) return;
+    try{ await db(`profiles?id=eq.${S.person.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({active:on})});
+      S.person.active=on; toast(on?'Доступ включён':'Доступ отключён'); go('person',false);
+    }catch(e){ toast(e.message,true); }
+  };
+  const pso=document.getElementById('ps_off'); if(pso) pso.onclick=()=>toggleAccess(false);
+  const psn=document.getElementById('ps_on');  if(psn) psn.onclick=()=>toggleAccess(true);
+
+  const pps=document.getElementById('pp_save');
+  if(pps) pps.onclick=async()=>{
+    const K=['calls_day','talks_day','dm_talks_day','briefs_week','proposals_week','won_month','cash_month'];
+    const body={profile_id:S.person.id, month:monthKey(), set_by:S.prof.id};
+    for(const k of K){ const v=document.getElementById('pp_'+k).value.trim(); if(v==='') return toast('Заполни все семь цифр',true); body[k]=+v; }
+    try{
+      await db('plans?on_conflict=profile_id,month',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',body:JSON.stringify(body)});
+      toast('Личный план сохранён'); go('person',false);
+    }catch(e){ toast(e.message,true); }
+  };
+  const ppd=document.getElementById('pp_del');
+  if(ppd) ppd.onclick=async()=>{
+    try{ await db(`plans?profile_id=eq.${S.person.id}&month=eq.${monthKey()}`,{method:'DELETE',prefer:'return=minimal'});
+      toast('Личный план убран'); go('person',false); }catch(e){ toast(e.message,true); }
+  };
+
+  document.querySelectorAll('[data-note]').forEach(b=>b.onclick=()=>noteSheet(b.dataset.note));
+  const scb=document.querySelector('[data-script]'); if(scb) scb.onclick=()=>scriptSheet(S.lead);
+  const qr=document.getElementById('q_retry'); if(qr) qr.onclick=()=>{ toast('Пробую отправить…'); flushQueue(); };
+  document.querySelectorAll('[data-open-script]').forEach(b=>b.onclick=()=>{
+    const x=S.scripts.find(y=>y.id===b.dataset.openScript);
+    if(isAdmin()) scriptEditor(x); else scriptSheet(null, x.kind==='script'?x.stage:undefined);
+  });
+  document.querySelectorAll('[data-new-script]').forEach(b=>b.onclick=()=>scriptEditor(null));
+  document.querySelectorAll('[data-lesson]').forEach(b=>b.onclick=()=>{
+    S.lesson=S.lessons.find(l=>l.id===b.dataset.lesson); if(S.lesson) go('lesson'); });
+  const nl=document.querySelector('[data-new-lesson]'); if(nl) nl.onclick=()=>lessonEditor(null);
+  const le=document.getElementById('ls_edit'); if(le) le.onclick=()=>lessonEditor(S.lesson);
+  const lc=document.getElementById('ls_check');
+  if(lc) lc.onclick=async()=>{
+    const qs=S.lesson.questions||[]; let ok=0;
+    qs.forEach((q,i)=>{
+      const box=document.querySelector(`[data-q="${i}"]`), hint=box.querySelector('.hint');
+      const v=box.querySelector('input:checked')?.value;
+      const right = v!=null && +v===q.correct;
+      if(right) ok++;
+      box.classList.toggle('ok',right); box.classList.toggle('bad',!right);
+      hint.hidden=false;
+      hint.textContent = right ? 'Верно' : `Правильно: ${q.options[q.correct]}.${q.hint?' '+q.hint:''}`;
+    });
+    if(ok===qs.length){
+      try{
+        await db('lesson_progress?on_conflict=profile_id,lesson_id',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',
+          body:JSON.stringify({profile_id:S.prof.id, lesson_id:S.lesson.id, score:ok, total:qs.length, passed_at:new Date().toISOString()})});
+        if(!S.progress.some(x=>x.lesson_id===S.lesson.id)) S.progress.push({profile_id:S.prof.id, lesson_id:S.lesson.id});
+        toast('Урок пройден');
+      }catch(e){ toast(e.message,true); }
+    } else toast(`${ok} из ${qs.length}. Прочитай подсказки и попробуй ещё`, true);
+    lc.scrollIntoView({block:'end'});
+  };
+  const notesBtn=document.querySelector('[data-notes]'); if(notesBtn) notesBtn.onclick=notesSheet;
+
+  const nds=document.getElementById('nd_save');
+  if(nds){
+    const K=['calls_day','talks_day','dm_talks_day','briefs_week','proposals_week','won_month','cash_month'];
+    const preview=()=>{
+      const w1=+document.querySelector('[data-week="1"]')?.value||100;
+      const g=k=>Math.ceil((+document.getElementById('nd_'+k).value||0)*w1/100);
+      const el=document.getElementById('rs_prev');
+      if(el) el.textContent=`Новичок на 1-й неделе получит: звонки ${g('calls_day')}, разговоры ${g('talks_day')}, ЛПР ${g('dm_talks_day')}, брифы ${g('briefs_week')}, КП ${g('proposals_week')}`;
+    };
+    document.querySelectorAll('#nd_calls_day,#nd_talks_day,#nd_dm_talks_day,#nd_briefs_week,#nd_proposals_week,[data-week]').forEach(i=>i.oninput=preview);
+    preview();
+    document.getElementById('rs_add').onclick=()=>{
+      const w=(S.ramp.at(-1)?.week||0)+1; S.ramp.push({week:w,pct:100}); render(); };
+    nds.onclick=async()=>{
+      const body={updated_by:S.prof.id};
+      for(const k of K){ const v=document.getElementById('nd_'+k).value.trim(); if(v==='') return toast('Заполни все цифры',true); body[k]=+v; }
+      const steps=[...document.querySelectorAll('[data-week]')].map(i=>({week:+i.dataset.week, pct:Math.max(0,Math.min(100,+i.value||0))}));
+      try{
+        await db('plan_defaults?id=eq.true',{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
+        await db('ramp_steps?on_conflict=week',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',body:JSON.stringify(steps)});
+        toast('Нормы сохранены'); go('norms',false);
+      }catch(e){ toast(e.message,true); }
+    };
+  }
 
   const take=document.querySelector('[data-take]');
   if(take) take.onclick=async()=>{
