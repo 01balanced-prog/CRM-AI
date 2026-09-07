@@ -12,6 +12,10 @@
 set -e
 KEY="${1:-$CRM_READONLY_KEY}"
 API="${CRM_API:-https://wiokdxswbcmjdpalyrat.supabase.co/rest/v1}"
+# Публичный ключ проекта, тот же что в index.html. Шлюз Supabase требует в
+# заголовке apikey зарегистрированный ключ и отбивает самодельный JWT ещё
+# до базы. Прав он не даёт: роль определяет Authorization.
+PUB="${CRM_GATEWAY_KEY:-sb_publishable_AWo5r5fudoIWayLflnZOeQ_s5Db1q2C}"
 
 if [ -z "$KEY" ]; then
   echo "Не передан ключ: sh verify.sh '<ключ>'" >&2
@@ -24,7 +28,7 @@ bad=0
 call() {
   want="$1"; label="$2"; shift 2
   body=$(curl -s -m 20 -w '\n%{http_code}' "$@" \
-    -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json')
+    -H "apikey: $PUB" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json')
   code=$(printf '%s' "$body" | tail -n1)
   data=$(printf '%s' "$body" | sed '$d' | cut -c1-110)
   if [ "$code" = "$want" ]; then

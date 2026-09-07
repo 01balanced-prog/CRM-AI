@@ -42,12 +42,17 @@ components:
       type: apiKey
       in: header
       name: apikey
-      description: Ключ только на чтение (тот же токен, что и в Authorization).
+      description: >-
+        Публичный ключ проекта (`sb_publishable_…`, тот же что в index.html).
+        Шлюз Supabase требует здесь зарегистрированный ключ проекта и отбивает
+        самодельный JWT ещё до базы. Прав не даёт: роль определяет Authorization.
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Тот же ключ в виде `Bearer <токен>`.
+      description: >-
+        Ключ только на чтение в виде `Bearer <токен>`. Именно он определяет
+        роль в базе — `crm_readonly`.
 
   parameters:
     select:

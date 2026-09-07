@@ -20,6 +20,13 @@ const env = (k: string, d: string) =>
   (globalThis as any).Deno?.env?.get(k) ?? (globalThis as any).process?.env?.[k] ?? d;
 
 const CRM_API = env('CRM_API', 'https://wiokdxswbcmjdpalyrat.supabase.co/rest/v1');
+
+// Публичный ключ проекта — тот же, что лежит открыто в index.html. Шлюз Supabase
+// требует в заголовке apikey зарегистрированный ключ проекта и отбивает любой
+// самодельный JWT, не доходя до базы. Прав он не даёт никаких: роль решает
+// заголовок Authorization, а без него это анонимный доступ, которому RLS
+// не отдаёт ни строки.
+const GATEWAY_KEY = env('CRM_GATEWAY_KEY', 'sb_publishable_AWo5r5fudoIWayLflnZOeQ_s5Db1q2C');
 const NAME = 'balance-crm-readonly';
 const VERSION = '1.0.0';
 const PROTOCOL = '2025-06-18';
@@ -116,12 +123,18 @@ const LEAD_FIELDS = [
   'score', 'touch_count', 'last_touch_at',
 ].join(',');
 
+// Ключ вида sb_… шлюз понимает сам и роль по нему определяет тоже сам.
+// Ключ-JWT (crm_readonly) идёт в Authorization, а шлюзу подаётся публичный ключ.
+const authHeaders = (key: string) =>
+  key.startsWith('sb_')
+    ? { apikey: key }
+    : { apikey: GATEWAY_KEY, Authorization: `Bearer ${key}` };
+
 async function crm(key: string, path: string, init: RequestInit = {}) {
   const r = await fetch(`${CRM_API}/${path}`, {
     ...init,
     headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
+      ...authHeaders(key),
       'Content-Type': 'application/json',
       ...(init.headers ?? {}),
     },
