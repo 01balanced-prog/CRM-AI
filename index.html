@@ -347,6 +347,18 @@ async function db(path, opts={}){
   return j;
 }
 
+// Функция в базе: касание, лид с контактами — одной транзакцией
+function rpc(fn, args){
+  return db(`rpc/${fn}`, { method:'POST', prefer:'return=representation', body:JSON.stringify(args) });
+}
+// Идентификатор касания: повтор «Сохранить» после обрыва связи не создаёт дубль
+function uuid(){
+  if(crypto.randomUUID) return crypto.randomUUID();
+  const b=crypto.getRandomValues(new Uint8Array(16)); b[6]=b[6]&15|64; b[8]=b[8]&63|128;
+  const h=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
+
 // Значение для фильтра PostgREST: в кавычках, чтобы запятые и скобки в поиске
 // не ломали запрос («Кафе (центр)», «Чай, кофе»)
 function pgq(v){ return '"'+String(v).replace(/["\\]/g,'\\$&')+'"'; }
@@ -734,9 +746,10 @@ function leadScreen(){
 
 function ev(a){
   const cls = a.outcome==='answered'?'ok' : (a.outcome==='no_answer'||a.outcome==='refused')?'bad':'';
-  const h = a.channel==='system'
-    ? `${STATUS[a.status_from]||a.status_from} → ${STATUS[a.status_to]||a.status_to}`
-    : `${CHAN[a.channel]} · ${OUT[a.outcome]}`;
+  const h = a.channel!=='system' ? `${CHAN[a.channel]} · ${OUT[a.outcome]}`
+    : a.status_from!==a.status_to
+      ? `${STATUS[a.status_from]||a.status_from} → ${STATUS[a.status_to]||a.status_to}`
+      : (a.comment || 'Система');
   return `<div class="ev ${cls}"><div class="h">${esc(h)}</div>
     <div class="t">${new Date(a.created_at).toLocaleString('ru-RU',
       {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
@@ -746,6 +759,7 @@ function ev(a){
 /* ── ЛИСТ КАСАНИЯ ── */
 function touchSheet(){
   const l=S.lead;
+  const clientId=uuid();
   const d=document.createElement('div');
   d.className='sheet';
   d.innerHTML=`<div class="inner"><div class="grab"></div>
@@ -865,8 +879,7 @@ function touchSheet(){
     const gv=id=>d.querySelector('#'+id+' .chip.on')?.dataset.v;
     const status=st.value;
     const patch={ status, tariff:d.querySelector('#tf').value||null };
-    // Взял ничейный лид в работу — он твой
-    if(!S.lead.owner_id && !isAdmin()) patch.owner_id = S.prof.id;
+    // Ничейный лид при касании становится твоим — это делает база в log_touch
     if(status==='lost') patch.lost_reason=d.querySelector('#lr').value;
     if(!['new','won','lost'].includes(status)){
       patch.next_action_at=d.querySelector('#nd').value;
@@ -885,15 +898,20 @@ function touchSheet(){
       + [nc.name, nc.position, nc.phone?fmtPhone(nc.phone):nc.raw].filter(Boolean).join(', ');
 
     try{
-      if(hasNc) await saveContact(S.lead.company_id, nc);
-      await db('activities', { method:'POST', prefer:'return=minimal', body:JSON.stringify({
-        lead_id:S.lead.id, author_id:S.prof.id, channel:gv('ch'), outcome:gv('oc'),
-        with_dm:d.querySelector('#wdm').checked,
-        comment:cm||null }) });
-      await db(`leads?id=eq.${S.lead.id}`, { method:'PATCH', prefer:'return=minimal',
-        body:JSON.stringify(patch) });
+      // Контакт, лид и запись в журнал — одна транзакция в базе. Если упадёт
+      // правило (нет даты, нет причины), не останется ни касания, ни полустатуса.
+      const r = await rpc('log_touch', {
+        client_id:clientId, lead_id:S.lead.id,
+        channel:gv('ch'), outcome:gv('oc'), status,
+        with_dm:d.querySelector('#wdm').checked, comment:cm||null,
+        next_action_at:patch.next_action_at, next_action:patch.next_action,
+        lost_reason:patch.lost_reason||null, tariff:patch.tariff,
+        contact: hasNc ? {name:nc.name||null, position:nc.position||null,
+                          phone:nc.phone, phone_raw:nc.raw||null, dm:nc.dm} : null });
       d.remove(); await openLead(S.lead.id, false);
-      toast('Записано', false, {label:'Следующий →', fn:nextLead});
+      if(r?.auto_closed) toast('Записано. Пять недозвонов подряд — лид закрыт',
+        false, {label:'Следующий →', fn:nextLead});
+      else toast('Записано', false, {label:'Следующий →', fn:nextLead});
     }catch(e){ toast(e.message,true); btn.disabled=false; btn.textContent='Сохранить'; }
   };
 }
@@ -1037,8 +1055,7 @@ async function saveLead(){
     site_url:g('f_site')||null, outlets_count:n('f_out'), avg_check:n('f_chk'),
     has_online_order:document.getElementById('f_oo').checked,
     has_own_app:document.getElementById('f_app').checked,
-    note:g('f_note')||null, todo:g('f_todo')||null,
-    ...(S.editing?{}:{created_by:S.prof.id}) };
+    note:g('f_note')||null, todo:g('f_todo')||null };
   const ph=phone(g('f_phone'));
   const dm={ name:g('f_dmname')||null, position:g('f_dmpos')||null, phone:phone(g('f_dmphone')),
              raw:g('f_dmphone')||null };
@@ -1081,13 +1098,11 @@ async function saveLead(){
       await saveDm(S.editing.company_id, ph || S.editing.primary_phone);
       const id=S.editing.id; S.editing=null; toast('Сохранено'); await openLead(id, false);
     }else{
-      const c=(await db('companies',{method:'POST',body:JSON.stringify(co)}))[0];
-      if(ph) await db('contacts',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
-        {company_id:c.id, phone_e164:ph, phone_raw:g('f_phone'), is_primary:true})});
-      await saveDm(c.id, ph);
-      const ld=(await db('leads',{method:'POST',body:JSON.stringify(
-        {company_id:c.id, status:'new', owner_id:S.prof.id})}))[0];
-      toast('Лид создан'); await openLead(ld.id);
+      // Одной транзакцией: не остаётся компании-сироты, если лид не создался
+      const id = await rpc('create_lead', { company:co, phone:ph, phone_raw:g('f_phone')||null,
+        dm: hasDm ? {name:dm.name, position:dm.position, phone:dm.phone, phone_raw:dm.raw} : null,
+        take:true });
+      toast('Лид создан'); await openLead(id);
     }
   }catch(e){
     toast(e.message.includes('duplicate')?'Такая компания уже есть':e.message,true);
@@ -1310,16 +1325,11 @@ async function runImport(rows){
         upd++; continue;
       }
 
-      const c=(await db('companies',{method:'POST',body:JSON.stringify({
-        name:r.name, segment:r.segment, instagram_url:r.instagram_url,
-        gis_url:r.gis_url, outlets_count:r.outlets_count, note:r.note,
-        created_by:S.prof.id })}))[0];
-      if(r.phone) await db('contacts',{method:'POST',prefer:'return=minimal',
-        body:JSON.stringify({company_id:c.id, phone_e164:r.phone, phone_raw:r.raw, is_primary:true})});
-      // Ответственного не ставим: загруженные пачкой лиды идут в общий пул,
-      // менеджер забирает их себе сам.
-      await db('leads',{method:'POST',prefer:'return=minimal',
-        body:JSON.stringify({company_id:c.id, status:'new'})});
+      // Компания, номер и лид одной транзакцией. Ответственного не ставим:
+      // загруженные пачкой лиды идут в общий пул, менеджер забирает их себе сам.
+      await rpc('create_lead', { company:{ name:r.name, segment:r.segment,
+        instagram_url:r.instagram_url, gis_url:r.gis_url, outlets_count:r.outlets_count,
+        note:r.note }, phone:r.phone, phone_raw:r.raw||null, dm:null, take:false });
       added++;
     }catch{ fail++; }
   }
