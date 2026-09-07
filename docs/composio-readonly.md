@@ -73,7 +73,7 @@ grant  crm_readonly to authenticator;     -- вернуть доступ
 паролей не появляется.
 
 1. Supabase → слева **Edge Functions** → **Deploy a new function** → **Via Editor**.
-2. Имя функции: `crm-mcp`. Ровно так, оно попадёт в URL.
+2. Имя функции: `crm-mcp`.
 3. Стереть заготовку и вставить целиком
    [`integrations/composio/mcp/index.ts`](../integrations/composio/mcp/index.ts).
 4. **Deploy**.
@@ -85,11 +85,22 @@ grant  crm_readonly to authenticator;     -- вернуть доступ
    Открытым доступ от этого не становится: без ключа функция ничего не отдаёт,
    а с ключом отдаёт ровно то, что ключу разрешено. Все проверки — в базе.
 
-Адрес получится такой:
+**Адрес брать из колонки URL в списке функций, а не собирать из имени.**
+Редактор подставляет адрес сам, и он не совпадает с именем: функция может
+называться `crm-mcp`, а отвечать по адресу
+`https://wiokdxswbcmjdpalyrat.supabase.co/functions/v1/quick-endpoint`.
+Рядом с адресом есть кнопка копирования — ей и пользоваться.
 
+Проверить, что сервер поднялся (ключ для этого не нужен, список инструментов
+открыт):
+
+```bash
+curl -s -X POST '<адрес из колонки URL>' -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
-https://wiokdxswbcmjdpalyrat.supabase.co/functions/v1/crm-mcp
-```
+
+Должны прийти шесть инструментов. `{"code":"NOT_FOUND"}` означает, что адрес
+взят неверно.
 
 ## Шаг 4. Собрать коннектор в Composio
 
@@ -100,7 +111,7 @@ Dashboard → **Apps** → **Add Custom MCP**. Заполнить:
 | Поле | Значение |
 |---|---|
 | Display name | `Balance CRM (только чтение)` |
-| MCP server URL | `https://wiokdxswbcmjdpalyrat.supabase.co/functions/v1/crm-mcp` |
+| MCP server URL | адрес из колонки URL в списке Edge Functions |
 | Authentication | `API key` |
 | Header name | `Authorization` |
 | Header prefix | `Bearer` |
