@@ -106,7 +106,12 @@ curl -s -X POST '<адрес из колонки URL>' -H 'content-type: applica
 
 Под аккаунтом компании, не под личным.
 
-Dashboard → **Apps** → **Add Custom MCP**. Заполнить:
+**Сначала выбрать область.** У Composio их две, и каталоги у них разные:
+переключатель **Switch** слева сверху, **FOR YOU** и **PLATFORM**. Коннектор,
+созданный в PLATFORM, ИИ-клиенту не виден: PLATFORM — это сборка агентов через
+SDK. Нужен **FOR YOU**.
+
+Switch → **FOR YOU** → **Connect Apps** → **Add Custom MCP**. Заполнить:
 
 | Поле | Значение |
 |---|---|
