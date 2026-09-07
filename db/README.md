@@ -58,6 +58,35 @@ pg_dump "postgresql://postgres.[ref]:[пароль]@aws-0-eu-central-1.pooler.su
 и `rpc/create_lead`. SQL Editor выполняет файл одной транзакцией: при ошибке не
 применится ничего, база останется прежней.
 
+## `08_team.sql` — этап 1: команда и приглашения
+
+- `profiles.started_at`, `active`, `ramp_enabled`. Функции доступа учитывают `active`.
+- `invites` и триггер на `auth.users`: профиль создаётся только приглашённому.
+- `apply_invites()`: приглашение для уже заведённого аккаунта.
+
+После применения в Supabase включить регистрацию по почте (README, раздел «Доступы»).
+
+## `09_plans.sql` — этап 2: план и разгон
+
+- `plan_defaults`, `ramp_steps`, `plans`; `effective_plan(profile, day)`.
+- `leads.owner_since` и обновлённый `leads_guard`.
+- `v_kpi_day`, `v_kpi_week`, `v_kpi_month`, `v_team_today`, `v_plan_today`, `plan_streak()`.
+
+## `10_scripts.sql` — этап 3: скрипты
+
+- `scripts`, колонки `activities.script_id` и `objection_id`.
+- `log_touch` пересоздан с двумя новыми параметрами. Старая сигнатура удалена:
+  PostgREST не различает перегрузки. Клиент версии 9 продолжает работать,
+  у новых параметров есть значения по умолчанию.
+- Стартовые скрипты и возражения с фиксированными id.
+
+## `11_lessons.sql` — этап 4: обучение и наставник
+
+- `lessons`, `lesson_progress`, `coaching_notes`. Журнал касаний не тронут.
+- Стартовые уроки с фиксированными id.
+
+Файлы `08`–`11` выполняются подряд, каждый заканчивается контрольной строкой.
+
 ## Правила
 
 - `00_baseline.sql` отражает то, что уже выполнено. В живую базу не запускается.
