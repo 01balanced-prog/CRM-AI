@@ -1,0 +1,95 @@
+# Схема базы
+
+Здесь лежат SQL-файлы по порядку номеров. Живая база в Supabase собрана файлами
+`01`–`06`, которых в репозитории нет и никогда не было: они вставлялись в SQL Editor
+при создании проекта. Вместо них в репозитории `00_baseline.sql`.
+
+## `00_baseline.sql` — восстановленная схема, не выгрузка
+
+Файл **восстановлен** по коду `index.html`, README и AGENTS.md: таблицы, колонки,
+представления и правила, которые приложение ожидает от базы. Он нужен, чтобы поднять
+копию базы на локальном Postgres и проверять на ней миграции `07` и дальше.
+
+**В живую базу его не запускать.** Там всё это уже есть.
+
+Что в нём наверняка совпадает с живой базой: имена таблиц и колонок, которые клиент
+читает и пишет напрямую, набор колонок представлений, правила из AGENTS.md.
+Что могло отличаться: имена триггеров, политик и индексов, формула приоритета `score`,
+точный текст ошибок. Для миграций это не важно: они не ссылаются на имена триггеров
+и политик.
+
+### Как сверить с живой базой
+
+Выполнить в SQL Editor и сравнить с `00_baseline.sql`:
+
+```sql
+select table_name, column_name, data_type
+  from information_schema.columns
+ where table_schema = 'public'
+ order by table_name, ordinal_position;
+```
+
+Если колонка есть в живой базе, но нет в `00_baseline.sql`, дописать её в baseline
+новым коммитом. Если наоборот, значит, клиент использует колонку, которой нет,
+и это ошибка в клиенте.
+
+### Когда заменить настоящей выгрузкой
+
+Как только появится доступ к `pg_dump` (нужен пароль базы: Supabase → Project Settings →
+Database → Connection string, режим **Session**):
+
+```bash
+pg_dump "postgresql://postgres.[ref]:[пароль]@aws-0-eu-central-1.pooler.supabase.com:5432/postgres" \
+  --schema-only --no-owner --schema=public --file=db/00_baseline.sql
+```
+
+Выгрузка кладётся на место восстановленного файла тем же именем. Миграции `07+`
+при этом не меняются.
+
+## `07_rpc.sql` — нулевой этап концепции 2.0
+
+- `activities.client_id` — клиентский идентификатор касания, повтор не создаёт дубль.
+- `activities.author_id` по умолчанию `current_profile_id()`.
+- `today_msk()`: день считается по Europe/Moscow. Представления пересобраны.
+- `log_touch(...)`: контакт, статус лида и запись в журнал одной транзакцией.
+- `create_lead(...)`: компания, контакты и лид одной транзакцией.
+
+Применять **до** публикации `index.html` версии 9: клиент вызывает `rpc/log_touch`
+и `rpc/create_lead`. SQL Editor выполняет файл одной транзакцией: при ошибке не
+применится ничего, база останется прежней.
+
+## Правила
+
+- `00_baseline.sql` отражает то, что уже выполнено. В живую базу не запускается.
+- Любое изменение схемы: новый файл `NN_описание.sql`, только дописывающий.
+  Существующие файлы не редактируются.
+- Колонки добавлять только через `alter table ... add column if not exists`.
+- Представления пересоздавать цепочкой `v_stats` → `v_today` → `v_leads`,
+  каждое `with (security_invoker = true)`, после чего повторить `grant select`.
+- Каждая новая таблица: RLS плюс явный `grant` для `authenticated`.
+- Папку `supabase/` не создавать.
+
+## Как проверять локально
+
+Postgres 16. Роль `authenticated` и схема `auth` с `auth.users` и `auth.uid()` нужны
+**до** `00_baseline.sql`, иначе гранты не применятся и тест соврёт:
+
+```sql
+create role authenticated nologin;
+create schema auth;
+create table auth.users (id uuid primary key, email text unique);
+create function auth.uid() returns uuid language sql stable as
+  $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+grant usage on schema auth to authenticated;
+grant execute on function auth.uid() to authenticated;
+```
+
+Затем всю цепочку `db/*.sql` с нуля, каждый файл дважды. Роли проверять так:
+
+```sql
+set role authenticated;
+set request.jwt.claim.sub = '<uuid из auth.users>';   -- админ, менеджер или посторонний
+```
+
+Посторонний (аккаунт без строки в `profiles`) должен видеть нули во всех таблицах
+и представлениях, а вставка должна отбиваться политикой.
