@@ -378,7 +378,8 @@ async function auth(path, body){
     body:JSON.stringify(body)
   });
   const j = await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(j.error_description || j.msg || j.message || 'Ошибка входа');
+  // status нужен, чтобы отличить «сервер отверг» от «сети нет»: сессию стираем только в первом случае
+  if(!r.ok) throw Object.assign(new Error(j.error_description || j.msg || j.message || 'Ошибка входа'), {status:r.status});
   return j;
 }
 
@@ -394,7 +395,12 @@ function refresh(){
       const j = await auth('token?grant_type=refresh_token', {refresh_token:s.refresh_token});
       j.expires_at = Date.now() + (j.expires_in-60)*1000;
       LS.set('sess', j); return j;
-    }catch{ LS.del('sess'); return null; }
+    }catch(e){
+      // Токен истёк в момент, когда связи нет: это не «выйти», это «подождать».
+      // Сессия остаётся, ошибка сети уходит наверх, и касание ляжет в очередь.
+      if(!e.status) throw e;
+      LS.del('sess'); return null;
+    }
   })().finally(()=>{ refreshing=null; });
   return refreshing;
 }
@@ -408,7 +414,7 @@ async function token(){
 
 async function db(path, opts={}){
   const t = await token();
-  if(!t){ S.user=null; render(); throw new Error('Сессия истекла, войди заново'); }
+  if(!t){ S.user=null; render(); throw Object.assign(new Error('Сессия истекла, войди заново'), {auth:true}); }
   const r = await fetch(`${API}/rest/v1/${path}`, {
     ...opts,
     headers:{ 'apikey':SUPABASE_KEY, 'Authorization':`Bearer ${t}`,
@@ -455,8 +461,10 @@ function fmt(text, lead){
 }
 
 // Очередь касаний без связи. client_id делает повтор безопасным: база не создаст дубль.
-const isOffline = e => e && (e.name==='TypeError' || /fetch|network|сет/i.test(e.message||'')) && !navigator.onLine
-  || (e && e.name==='TypeError');
+// Сетевая ошибка: телефон говорит «сети нет» или fetch упал, не получив ответа.
+// Ошибка в коде тоже TypeError, поэтому смотрим на текст: «Failed to fetch», «Load failed», «NetworkError».
+const isOffline = e => !!e && (!navigator.onLine
+  || (e.name==='TypeError' && /fetch|network|load failed/i.test(e.message||'')));
 function queueGet(){ return LS.get('queue')||[]; }
 function queueAdd(item){ const q=queueGet(); q.push({...item, at:Date.now()}); LS.set('queue',q); }
 let flushing=false;
@@ -466,7 +474,7 @@ async function flushQueue(){
   try{
     for(const item of [...q]){
       try{ await rpc('log_touch', item.args); sent++; LS.set('queue', queueGet().filter(x=>x.args.client_id!==item.args.client_id)); }
-      catch(e){ if(isOffline(e)) break; // связи всё ещё нет, остальные подождут
+      catch(e){ if(isOffline(e) || e.auth) break; // связи или сессии нет: очередь ждёт, ничего не теряем
         // Ошибка правила базы: касание отправлять бессмысленно, убираем и говорим
         LS.set('queue', queueGet().filter(x=>x.args.client_id!==item.args.client_id));
         toast(`Касание не принято: ${e.message}`, true); }
@@ -537,19 +545,32 @@ const isAdmin = ()=> S.prof?.role==='admin';
 
 /* ─────────── ЗАГРУЗКА ─────────── */
 async function boot(){
-  const t = await token();
-  if(!t){ S.user=null; return render(); }
+  let t=null;
+  try{ t = await token(); }catch(e){ if(!isOffline(e)) throw e; }
+  const s = LS.get('sess');
+  if(!s){ S.user=null; return render(); }
+  S.user = s.user;
+  // Профиль и тарифы кэшируем: без связи приложение открывается на сохранённом,
+  // а не показывает «Доступ не выдан» с кнопкой, стирающей сессию.
+  const cached = LS.get('boot');
   try{
-    const s = LS.get('sess');
-    S.user = s.user;
+    if(!t) throw Object.assign(new TypeError('Failed to fetch'), {boot:true});
     const p = await db(`profiles?id=eq.${s.user.id}&select=*`);
-    if(!p.length){ S.prof=null; return render(); }
+    if(!p.length){ S.prof=null; LS.del('boot'); return render(); }
     S.prof = p[0];
     S.tariffs = await db('tariffs?select=*&order=sort_order');
     if(S.prof.role==='admin') S.staff = await db('profiles?select=id,name,role,active,started_at,ramp_enabled&order=name');
+    LS.set('boot', {prof:S.prof, tariffs:S.tariffs, staff:S.staff});
+    S.offline=false;
     flushQueue();
     await load();
-  }catch(e){ toast(e.message, true); }
+  }catch(e){
+    if(isOffline(e) && cached?.prof){
+      S.prof=cached.prof; S.tariffs=cached.tariffs||[]; S.staff=cached.staff||[]; S.offline=true;
+      toast('Нет связи. Показываю сохранённое, касания встанут в очередь');
+    } else if(isOffline(e)){ S.offline=true; }
+    else toast(e.message, true);
+  }
   render();
 }
 
@@ -648,6 +669,7 @@ function render(){
   const app=document.getElementById('app');
   if(SUPABASE_URL.startsWith('ВСТАВЬ')) return app.innerHTML = setupScreen();
   if(!S.user) return app.innerHTML = loginScreen(), bindLogin();
+  if(!S.prof && S.offline) return app.innerHTML = offlineScreen(), bindOffline();
   if(!S.prof) return app.innerHTML = noAccessScreen(), bindNoAccess();
   const v = { today:todayScreen, list:listScreen, lead:leadScreen, add:addScreen,
               more:moreScreen, imp:importScreen, report:reportScreen,
@@ -726,7 +748,19 @@ function noAccessScreen(){
   <button class="btn ghost" id="out">Выйти</button></div>`;
 }
 function bindNoAccess(){
-  document.getElementById('out').onclick=()=>{ LS.del('sess'); S.user=null; S.prof=null; render(); };
+  document.getElementById('out').onclick=()=>{ LS.del('sess'); LS.del('boot'); S.user=null; S.prof=null; render(); };
+}
+// Первый запуск без связи: кэша профиля ещё нет, показать нечего. Сессию не трогаем.
+function offlineScreen(){
+  return `<div class="login"><div class="logo">balance<i>.</i></div>
+  <p class="tag">Нет связи</p>
+  <div class="card"><p style="margin:0;font-size:14.5px;line-height:1.6">
+  Не удалось загрузить данные. Проверь интернет и попробуй ещё раз.
+  Ты остаёшься в системе, входить заново не нужно.</p></div>
+  <button class="btn" id="retry">Повторить</button></div>`;
+}
+function bindOffline(){
+  document.getElementById('retry').onclick=()=>{ document.getElementById('app').innerHTML='<div class="spin"></div>'; boot(); };
 }
 
 /* ── СЕГОДНЯ ── */
@@ -981,7 +1015,7 @@ function touchSheet(){
     <div id="lostBox" style="display:none">
       <label for="lr">Причина отказа</label>
       <select id="lr">${Object.entries(LOST).map(([k,v])=>
-        `<option value="${k}">${v}</option>`).join('')}</select>
+        `<option value="${k}" ${k===l.lost_reason?'selected':''}>${v}</option>`).join('')}</select>
     </div>
 
     <div id="nextBox">
@@ -1066,7 +1100,8 @@ function touchSheet(){
     d.querySelector('#nextBox').style.display = ['new','won','lost'].includes(st.value)?'none':'block';
     // Статус выбирается сам по исходу; показываем, что уйдёт в базу, не раскрывая подробностей
     d.querySelector('#stHint').textContent = st.value===l.status
-      ? `Статус останется: ${STATUS[st.value]}` : `Статус станет: ${STATUS[st.value]}`;
+      ? `Статус останется: ${STATUS[st.value]}`
+      : l.status==='lost' ? `Лид вернётся в работу: ${STATUS[st.value]}` : `Статус станет: ${STATUS[st.value]}`;
   };
   st.onchange=sync; sync();
   function autoStatus(o){
@@ -1074,10 +1109,13 @@ function touchSheet(){
     // а селект статуса спрятан под «Подробнее»
     if(st.value==='lost' && o!=='refused' && l.status!=='lost') st.value=l.status;
     if(o==='no_answer' && ['new','no_answer'].includes(st.value)) st.value='no_answer';
-    if(o==='answered' && ['new','no_answer'].includes(st.value)) st.value='contacted';
+    // Ответил или просил перезвонить — контакт есть. Закрытый лид (например, после пяти
+    // недозвонов) при этом возвращается в работу, а не остаётся «Отказом» с чужой причиной
+    if((o==='answered'||o==='callback') && ['new','no_answer','lost'].includes(st.value)) st.value='contacted';
     if(o==='refused') st.value='lost';
     sync();
   }
+  autoStatus('answered'); // исход по умолчанию тоже подчиняется правилу, а не только нажатие
 
   d.querySelector('#cancel').onclick=()=>d.remove();
   d.onclick=e=>{ if(e.target===d) d.remove(); };
@@ -1984,8 +2022,9 @@ async function loadReport(){
       planLine=`План: звонки ${sum('calls')}/${sum('calls_day')} · разговоры ${sum('talks')}/${sum('talks_day')} · ЛПР ${sum('dm_talks')}/${sum('dm_talks_day')}`;
     }
   }
-  const byLead=new Map(leads.map(l=>[l.id,l]));
-  const who=S.repWho;
+  // Журнал виден всей команде, поэтому менеджер считает только себя: иначе его
+  // «отчёт за сегодня» покажет чужие касания под подписью «вся команда»
+  const who = isAdmin() ? S.repWho : S.prof.id;
   const mine=a=>who==='all' || a.author_id===who;
   const leadMine=l=>who==='all' || l.owner_id===who;
 
@@ -2429,7 +2468,7 @@ function bind(){
   const rel=document.getElementById('reload'); if(rel) rel.onclick=()=>{ go(S.view); toast('Обновлено'); };
   const out=document.getElementById('out');
   if(out && S.view==='more'){
-    out.onclick=()=>{ LS.del('sess'); S.user=null; S.prof=null; render(); };
+    out.onclick=()=>{ LS.del('sess'); LS.del('boot'); S.user=null; S.prof=null; render(); };
     showVersion();
   }
 
