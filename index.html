@@ -330,11 +330,14 @@ const SUPABASE_KEY = 'sb_publishable_AWo5r5fudoIWayLflnZOeQ_s5Db1q2C';
 // Адрес можно вставлять хоть с хвостом /rest/v1/, хоть без — приведём к нужному виду
 const API = SUPABASE_URL.trim().replace(/\/+$/,'').replace(/\/(rest|auth)\/v1$/,'');
 
+// Коды статусов в базе старые, подписи под новую воронку: контакт → демо → цена.
+// Брифа и индивидуального КП нет: цена одна для всех, ценность показывает демо.
 const STATUS = {
   new:'Новый', no_answer:'Не дозвонился', contacted:'Контакт установлен',
-  brief_done:'Бриф снят', proposal_sent:'КП отправлено',
+  brief_done:'Демо получил', proposal_sent:'Цена названа',
   negotiation:'На согласовании', won:'Клиент', lost:'Отказ'
 };
+const DEMO = { general:'Общее демо', custom:'Индивидуальное демо' };
 const OPEN_ST = ['new','no_answer','contacted','brief_done','proposal_sent','negotiation'];
 const LOST = { price:'Дорого', no_need:'Нет потребности', has_solution:'Есть своё решение',
   unreachable:'Не дозвонились', not_target:'Не наш сегмент', other:'Другое' };
@@ -354,13 +357,13 @@ const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
             data:[], stats:null, log:[], filter:'all', own:'mine', q:'',
             busy:false, back:[], contacts:[], report:null, period:'today', repWho:'all',
             plan:null, streak:0, team:[], person:null, invites:[], defaults:null, ramp:[],
-            scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null };
+            scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null, segments:[] };
 
 const METRIC = { calls:'Звонки', talks:'Разговоры', dm_talks:'ЛПР', taken:'Взял в работу',
-  briefs:'Брифы', proposals:'КП', won:'Сделки', cash:'Деньги' };
+  briefs:'Демо', proposals:'Цена', won:'Сделки', cash:'Деньги' };
 const ROLE = { admin:'администратор', manager:'менеджер' };
 const STAGE = { first_call:'Первый звонок', gatekeeper:'Обход администратора', callback:'После недозвона',
-  brief:'Бриф', after_proposal:'После КП', closing:'Дожим' };
+  brief:'После демо', after_proposal:'После цены', closing:'Дожим' };
 const STAGE_BY_STATUS = { new:'first_call', no_answer:'callback', contacted:'brief', brief_done:'after_proposal',
   proposal_sent:'after_proposal', negotiation:'closing', won:'closing', lost:'first_call' };
 const MODULE = { product:'Продукт', sales:'Продажи', crm:'CRM' };
@@ -558,15 +561,15 @@ async function boot(){
     const p = await db(`profiles?id=eq.${s.user.id}&select=*`);
     if(!p.length){ S.prof=null; LS.del('boot'); return render(); }
     S.prof = p[0];
-    S.tariffs = await db('tariffs?select=*&order=sort_order');
+    [S.tariffs, S.segments] = await Promise.all([db('tariffs?select=*&order=sort_order'), db('segments?select=*&order=sort_order,name')]);
     if(S.prof.role==='admin') S.staff = await db('profiles?select=id,name,role,active,started_at,ramp_enabled&order=name');
-    LS.set('boot', {prof:S.prof, tariffs:S.tariffs, staff:S.staff});
+    LS.set('boot', {prof:S.prof, tariffs:S.tariffs, staff:S.staff, segments:S.segments});
     S.offline=false;
     flushQueue();
     await load();
   }catch(e){
     if(isOffline(e) && cached?.prof){
-      S.prof=cached.prof; S.tariffs=cached.tariffs||[]; S.staff=cached.staff||[]; S.offline=true;
+      S.prof=cached.prof; S.tariffs=cached.tariffs||[]; S.staff=cached.staff||[]; S.segments=cached.segments||[]; S.offline=true;
       toast('Нет связи. Показываю сохранённое, касания встанут в очередь');
     } else if(isOffline(e)){ S.offline=true; }
     else toast(e.message, true);
@@ -810,7 +813,7 @@ function planBlock(p, streak, compact){
   return `<div class="card plan">
     <h3>${compact?'Сегодня':'План на сегодня'}<span class="sub2">${[src,ser].filter(Boolean).join(' · ')}</span></h3>
     ${bar('calls',p.calls,p.calls_day)}${bar('talks',p.talks,p.talks_day)}${bar('dm_talks',p.dm_talks,p.dm_talks_day)}
-    <p class="pline">Неделя: брифы <b>${p.briefs}/${p.briefs_week}</b> · КП <b>${p.proposals}/${p.proposals_week}</b></p>
+    <p class="pline">Неделя: демо <b>${p.briefs}/${p.briefs_week}</b> · цена <b>${p.proposals}/${p.proposals_week}</b></p>
     <p class="pline">Месяц: сделки <b>${p.won}/${p.won_month}</b> · деньги <b>${money(p.cash).replace(' ₽','')}</b> из ${money(p.cash_month)}</p>
   </div>`;
 }
@@ -992,7 +995,7 @@ function leadScreen(){
 // Заголовок касания в журнале: заметка без звонка так и называется
 function touchTitle(a){
   if(a.channel==='other' && a.outcome==='other') return /^Отложен/.test(a.comment||'') ? 'Отложен' : 'Заметка';
-  return `${CHAN[a.channel]||a.channel} · ${OUT[a.outcome]||''}`;
+  return `${CHAN[a.channel]||a.channel} · ${OUT[a.outcome]||''}${a.demo?' · '+DEMO[a.demo].toLowerCase():''}`;
 }
 function ev(a){
   const cls = a.outcome==='answered'?'ok' : (a.outcome==='no_answer'||a.outcome==='refused')?'bad':'';
@@ -1030,6 +1033,9 @@ function touchSheet(){
       <div id="stBox">
         <label>Что произошло</label>
         <div class="chips" id="stc">${NEXT_ST.map(k=>`<button class="chip" data-s="${k}">${STATUS[k]}</button>`).join('')}</div>
+        <label>Отправил демо</label>
+        <div class="chips" id="demo"><button class="chip on" data-v="">Нет</button>${Object.entries(DEMO).map(([k,v])=>
+          `<button class="chip" data-v="${k}">${v.replace(' демо','')}</button>`).join('')}</div>
       </div>
       <button class="more" id="ncBtn" type="button" style="margin-top:0">Узнал контакт: имя, должность, телефон</button>
       <div id="ncBox" hidden>
@@ -1123,12 +1129,14 @@ function touchSheet(){
     setSt(stVal);
   }
   d.querySelectorAll('#stc .chip').forEach(b=>b.onclick=()=>setSt(b.dataset.s));
-  ['oc','dt','ch'].forEach(id=>{ const w=$(id);
+  ['oc','dt','ch','demo'].forEach(id=>{ const w=$(id);
     w.onclick=e=>{ const b=e.target.closest('[data-v],[data-d]'); if(!b) return;
       w.querySelectorAll('.chip').forEach(c=>c.classList.remove('on')); b.classList.add('on');
       if(b.dataset.d!=null) $('nd').value = plusDays(+b.dataset.d);
       if(id==='oc') autoStatus(b.dataset.v);
       if(id==='ch') chManual=true;
+      // Отправил демо — значит, «Демо получил», если лид ещё не дальше по воронке
+      if(id==='demo' && b.dataset.v && ['new','no_answer','contacted'].includes(stVal)) setSt('brief_done');
     }; });
   autoStatus('answered'); // исход по умолчанию тоже подчиняется правилу, а не только нажатие
 
@@ -1166,7 +1174,8 @@ function touchSheet(){
         lost_reason:patch.lost_reason||null, tariff:patch.tariff,
         contact: hasNc ? {name:nc.name||null, position:nc.position||null,
                           phone:nc.phone, phone_raw:nc.raw||null, dm:nc.dm} : null,
-        script_id:S.callScript?.script_id||null, objection_id:S.callScript?.objection_id||null });
+        script_id:S.callScript?.script_id||null, objection_id:S.callScript?.objection_id||null,
+        demo: gv('oc')==='no_answer' ? null : (gv('demo')||null) });
       d.remove(); await openLead(S.lead.id, false);
       if(r?.auto_closed) toast('Записано. Пять недозвонов подряд — лид закрыт',
         false, {label:'Следующий →', fn:nextLead});
@@ -1318,6 +1327,13 @@ function contactSheet(existing){
 }
 
 /* ── ДОБАВИТЬ / ИЗМЕНИТЬ ── */
+// Сегмент из справочника, а не текстом: «Суши, доставка» и «Суши-бар» были разными
+// сегментами, и скрипт по сегменту не находился. Старое значение вне списка остаётся видно.
+function segOptions(cur){
+  const list=S.segments.filter(s=>s.active||s.name===cur).map(s=>s.name);
+  if(cur && !list.includes(cur)) list.push(cur);
+  return `<option value="">Не указан</option>`+list.map(n=>`<option value="${esc(n)}" ${n===cur?'selected':''}>${esc(n)}</option>`).join('');
+}
 function addScreen(){
   const l=S.editing||{};
   const t=S.editing?'Изменить карточку':'Новый лид';
@@ -1341,9 +1357,7 @@ function addScreen(){
     </div>
 
     <label for="f_seg">Сегмент</label>
-    <input id="f_seg" type="text" value="${esc(l.segment||'')}" placeholder="Общепит" list="segs">
-    <datalist id="segs"><option>Общепит</option><option>Розница</option><option>Услуги</option>
-      <option>Опт</option><option>Недвижимость</option></datalist>
+    <select id="f_seg">${segOptions(l.segment)}</select>
     <label for="f_kind">Тип</label>
     <select id="f_kind">
       <option value="lead" ${l.kind!=='channel'?'selected':''}>Лид — потенциальный клиент</option>
@@ -1448,10 +1462,24 @@ function pickScript(stage, lead){
   return list.find(x=>x.segment && lead?.segment && x.segment.toLowerCase()===lead.segment.toLowerCase())
       || list.find(x=>!x.segment) || list[0] || null;
 }
+// Текст сообщения с подстановками, без разметки: уходит в WhatsApp как есть.
+// Без имени ЛПР «{лпр}, здравствуйте» превращается в «Здравствуйте».
+function fill(text, lead){
+  const t = lead?.tariff ? S.tariffs.find(x=>x.code===lead.tariff) : null;
+  const m = { 'компания':lead?.company_name, 'лпр':lead?.dm_name, 'тариф':t?.title,
+    'внедрение':lead?.setup_amount!=null?money(lead.setup_amount):null,
+    'подписка':lead?.mrr_amount!=null?money(lead.mrr_amount)+'/мес':null };
+  let s=String(text||'').replace(/\*\*(.+?)\*\*/g,'$1');
+  if(!m['лпр']) s=s.replace(/\{лпр\},\s*(\S)/g,(_,c)=>c.toUpperCase());
+  return s.replace(/\{(компания|лпр|тариф|внедрение|подписка)\}/g,(_,v)=>m[v]||'…');
+}
 function scriptSheet(lead, initialStage){
   const d=document.createElement('div'); d.className='sheet';
   let stage = initialStage || STAGE_BY_STATUS[lead?.status] || 'first_call';
   const objections=S.scripts.filter(x=>x.kind==='objection' && x.active);
+  const msgs=S.scripts.filter(x=>x.kind==='message' && x.active);
+  const ph = lead ? (lead.dm_phone||lead.primary_phone) : null;
+  const h3=t=>`<h3 style="margin:14px 0 4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">${t}</h3>`;
   const draw=()=>{
     const sc=pickScript(stage, lead);
     if(lead) S.callScript = { script_id: sc?.id||null, objection_id: S.callScript?.objection_id||null };
@@ -1460,17 +1488,25 @@ function scriptSheet(lead, initialStage){
       <p style="margin:0 0 10px;color:var(--muted);font-size:13.5px">${lead?esc(lead.company_name):'Общий вид без подстановок'}</p>
       <div class="chips">${Object.entries(STAGE).map(([k,v])=>`<button class="chip ${k===stage?'on':''}" data-st="${k}">${v}</button>`).join('')}</div>
       <div class="txt">${sc ? fmt(sc.body, lead) : '<p style="color:var(--dim)">Для этого этапа скрипта пока нет. Админ добавит во вкладке «Команда».</p>'}</div>
-      ${objections.length?`<h3 style="margin:14px 0 4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Возражения</h3>
-      ${objections.map(o=>`<div class="obj ${S.callScript?.objection_id===o.id?'open':''}" data-obj="${o.id}"><button type="button">${esc(o.title)}</button>
-        <div class="ans txt">${fmt(o.body, lead)}</div></div>`).join('')}`:''}
+      ${objections.length?h3('Возражения')+objections.map(o=>`<div class="obj ${S.callScript?.objection_id===o.id?'open':''}" data-obj="${o.id}"><button type="button">${esc(o.title)}</button>
+        <div class="ans txt">${fmt(o.body, lead)}</div></div>`).join(''):''}
+      ${msgs.length?h3('Сообщения в WhatsApp')+msgs.map(m=>`<div class="obj"><button type="button">${esc(m.title)}</button>
+        <div class="ans txt">${fmt(m.body, lead)}
+          <div class="chips" style="padding-top:8px">${ph?`<a class="chip on" href="https://wa.me/${ph.replace('+','')}?text=${encodeURIComponent(fill(m.body, lead))}" target="_blank" rel="noopener">Открыть в WhatsApp</a>`:''}
+          <button type="button" class="chip" data-copy="${m.id}">Скопировать</button></div></div></div>`).join(''):''}
       <button class="btn ghost" id="sc_close">Закрыть</button>
     </div>`;
     d.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>{ stage=b.dataset.st; draw(); });
-    d.querySelectorAll('.obj button').forEach(b=>b.onclick=()=>{
+    d.querySelectorAll('.obj > button').forEach(b=>b.onclick=()=>{
       const o=b.parentElement; const open=!o.classList.contains('open');
       d.querySelectorAll('.obj').forEach(x=>x.classList.remove('open'));
-      if(open){ o.classList.add('open'); if(lead) S.callScript.objection_id=o.dataset.obj; }
-      else if(lead) S.callScript.objection_id=null;
+      if(open){ o.classList.add('open'); if(lead && o.dataset.obj) S.callScript.objection_id=o.dataset.obj; }
+      else if(lead && o.dataset.obj) S.callScript.objection_id=null;
+    });
+    d.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{
+      const m=S.scripts.find(x=>x.id===b.dataset.copy);
+      try{ await navigator.clipboard.writeText(fill(m.body, lead)); toast('Скопировано'); }
+      catch{ toast('Не удалось скопировать: выдели текст пальцем', true); }
     });
     d.querySelector('#sc_close').onclick=()=>d.remove();
   };
@@ -1506,12 +1542,19 @@ function lessonOfDay(){
 
 function learnScreen(){
   const adm=isAdmin();
-  const head=`<div class="topbar"><h1>${adm?'Скрипты и уроки':'Учёба'}<span class="sub">${adm?'редактируется с телефона, без выкладки файла':'скрипты, возражения, уроки'}</span></h1></div>`;
+  const head=`<div class="topbar"><h1>${adm?'Скрипты и уроки':'Учёба'}<span class="sub">${adm?'редактируется с телефона, без выкладки файла':'скрипты, возражения, сообщения, уроки'}</span></h1></div>`;
   if(S.busy) return head+`<div class="spin"></div>`;
   const done=passedSet();
   const item=(x,label)=>`<button class="link" data-open-script="${x.id}" style="${!x.active?'color:var(--dim)':''}">
     <span>${esc(x.title)}<span class="cnt" style="margin-left:8px">${label}${!x.active?' · выключен':''}</span></span></button>`;
-  const scripts=S.scripts.filter(x=>x.kind==='script'), objs=S.scripts.filter(x=>x.kind==='objection');
+  const scripts=S.scripts.filter(x=>x.kind==='script'), objs=S.scripts.filter(x=>x.kind==='objection'),
+        msgs=S.scripts.filter(x=>x.kind==='message');
+  // Справочник сегментов правится здесь же: выключенный остаётся у старых лидов, новым не предлагается
+  const segs = adm ? `<div class="card"><h3>Сегменты</h3>
+    <div class="chips" style="flex-wrap:wrap">${S.segments.map(s=>`<button class="chip" data-seg="${esc(s.name)}" style="${s.active?'':'opacity:.4;text-decoration:line-through'}">${esc(s.name)}</button>`).join('')}</div>
+    <div class="two"><input id="seg_new" type="text" placeholder="Новый сегмент"><button class="btn ghost" id="seg_add" style="margin-top:0">Добавить</button></div>
+    <p class="note">Нажатие выключает или включает сегмент. Скрипт с сегментом показывается только лидам этого сегмента.</p>
+  </div>` : '';
   // Этап подписываем, только если название скрипта не повторяет его слово в слово
   const byStage=Object.keys(STAGE).flatMap(st=>scripts.filter(x=>x.stage===st).map(x=>item(x,
     [x.title.toLowerCase()===STAGE[st].toLowerCase()?'':STAGE[st], x.segment].filter(Boolean).join(' · '))));
@@ -1525,32 +1568,38 @@ function learnScreen(){
       ${adm?`<button class="btn ghost" data-new-script="script">Добавить скрипт</button>`:''}</div>
     <div class="card"><h3>Возражения</h3>${objs.map(x=>item(x,'')).join('')||'<p class="note" style="margin:0">Пока нет</p>'}
       ${adm?`<button class="btn ghost" data-new-script="objection">Добавить возражение</button>`:''}</div>
+    <div class="card"><h3>Сообщения в WhatsApp</h3>${msgs.map(x=>item(x,'')).join('')||'<p class="note" style="margin:0">Пока нет</p>'}
+      <p class="note">Открываются из карточки лида по кнопке «Скрипт» уже с подставленным названием и именем.</p>
+      ${adm?`<button class="btn ghost" data-new-script="message">Добавить сообщение</button>`:''}</div>
+    ${segs}
     <div class="card"><h3>Уроки · пройдено ${[...done].filter(id=>S.lessons.some(l=>l.id===id)).length} из ${S.lessons.filter(l=>l.active).length}</h3>${lessons||'<p class="note" style="margin:0">Пока нет</p>'}
       ${adm?`<button class="btn ghost" data-new-lesson>Добавить урок</button>`:''}</div>
   </div>`;
 }
 
 // Редактор скрипта или возражения. Только админ.
-function scriptEditor(x){
-  const isNew=!x; x=x||{kind:'script',stage:'first_call',active:true,sort_order:10,title:'',body:'',segment:''};
+function scriptEditor(x, newKind){
+  const isNew=!x; x=x||{kind:newKind||'script',stage:'first_call',active:true,sort_order:10,title:'',body:'',segment:''};
   const d=document.createElement('div'); d.className='sheet';
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 6px;font-size:19px">${isNew?'Новый':'Изменить'}</h2>
     <label for="se_kind">Тип</label>
     <select id="se_kind"><option value="script" ${x.kind==='script'?'selected':''}>Скрипт этапа</option>
-      <option value="objection" ${x.kind==='objection'?'selected':''}>Возражение</option></select>
+      <option value="objection" ${x.kind==='objection'?'selected':''}>Возражение</option>
+      <option value="message" ${x.kind==='message'?'selected':''}>Сообщение в WhatsApp</option></select>
     <div id="se_stage_box">
       <label for="se_stage">Этап</label>
       <select id="se_stage">${Object.entries(STAGE).map(([k,v])=>`<option value="${k}" ${x.stage===k?'selected':''}>${v}</option>`).join('')}</select>
-      <label for="se_seg">Сегмент (пусто = для всех)</label>
-      <input id="se_seg" type="text" value="${esc(x.segment||'')}" placeholder="Общепит" list="segs">
+      <label for="se_seg">Сегмент</label>
+      <select id="se_seg">${segOptions(x.segment||'').replace('>Не указан<','>Для всех сегментов<')}</select>
     </div>
-    <label for="se_title">${x.kind==='objection'?'Реплика клиента':'Название'}</label>
+    <label for="se_title" id="se_title_l">Название</label>
     <input id="se_title" type="text" value="${esc(x.title)}">
-    <label for="se_body">${x.kind==='objection'?'Ответ':'Текст'}</label>
+    <label for="se_body" id="se_body_l">Текст</label>
     <textarea id="se_body" style="min-height:220px">${esc(x.body)}</textarea>
     <p class="note">Пустая строка делит абзацы, «- » в начале строки — пункт, **жирный**.
-    Подстановки: {компания}, {лпр}, {тариф}, {внедрение}, {подписка}.</p>
+    Подстановки: {компания}, {лпр}, {тариф}, {внедрение}, {подписка}.
+    Сообщение открывается из карточки в WhatsApp уже с подставленным текстом.</p>
     <div class="two"><div><label for="se_order">Порядок</label><input id="se_order" type="number" inputmode="numeric" value="${x.sort_order}"></div>
       <div><label>&nbsp;</label><label class="check" style="padding:12px 0"><input type="checkbox" id="se_active" ${x.active?'checked':''}> Активен</label></div></div>
     <button class="btn" id="se_save">Сохранить</button>
@@ -1559,7 +1608,9 @@ function scriptEditor(x){
   </div>`;
   document.body.appendChild(d);
   const kind=d.querySelector('#se_kind'), box=d.querySelector('#se_stage_box');
-  const sync=()=>{ box.style.display = kind.value==='script'?'block':'none'; };
+  const sync=()=>{ box.style.display = kind.value==='script'?'block':'none';
+    d.querySelector('#se_title_l').textContent = kind.value==='objection'?'Реплика клиента':'Название';
+    d.querySelector('#se_body_l').textContent = kind.value==='objection'?'Ответ':'Текст'; };
   kind.onchange=sync; sync();
   d.querySelector('#se_cancel').onclick=()=>d.remove();
   d.onclick=e=>{ if(e.target===d) d.remove(); };
@@ -1791,7 +1842,7 @@ function personScreen(){
   const today = d.today ? planBlock(d.today, 0, true) : '';
   const pl=d.plan||{};
   const F=[['calls_day','Звонки в день'],['talks_day','Разговоры в день'],['dm_talks_day','ЛПР в день'],
-           ['briefs_week','Брифы в неделю'],['proposals_week','КП в неделю'],['won_month','Сделки в месяц'],['cash_month','Деньги в месяц, ₽']];
+           ['briefs_week','Демо в неделю'],['proposals_week','Цена названа в неделю'],['won_month','Сделки в месяц'],['cash_month','Деньги в месяц, ₽']];
   const plan=`<div class="card"><h3>Личный план · ${monthName(monthKey())}</h3>
     <p class="note" style="margin:0 0 6px">${d.plan?'Задан личный план: нормы и разгон не участвуют.':'Личного плана нет: действуют нормы и разгон.'}</p>
     <div class="two">${F.map(([k,t])=>`<div><label for="pp_${k}">${t}</label>
@@ -1824,7 +1875,7 @@ function normsScreen(){
   if(S.busy||!S.defaults) return head+`<div class="spin"></div>`;
   const d=S.defaults;
   const F=[['calls_day','Звонки в день'],['talks_day','Разговоры в день'],['dm_talks_day','ЛПР в день'],
-           ['briefs_week','Брифы в неделю'],['proposals_week','КП в неделю'],['won_month','Сделки в месяц'],['cash_month','Деньги в месяц, ₽']];
+           ['briefs_week','Демо в неделю'],['proposals_week','Цена названа в неделю'],['won_month','Сделки в месяц'],['cash_month','Деньги в месяц, ₽']];
   return head+`<div class="wrap">
     <div class="card"><h3>Нормы по умолчанию</h3>
       <div class="two">${F.map(([k,t])=>`<div><label for="nd_${k}">${t}</label>
@@ -2146,6 +2197,17 @@ async function loadReport(){
   const lostBy={};
   lost.forEach(l=>{ if(l.lost_reason) lostBy[l.lost_reason]=(lostBy[l.lost_reason]||0)+1; });
 
+  // Конверсия по лидам за период: не счётчики по этапам, а сколько дошло до следующего
+  const uniq=(arr,f)=>new Set(arr.filter(f).map(a=>a.lead_id)).size;
+  const conv=[
+    ['Касались',        uniq(touches, ()=>true)],
+    ['Говорили с ЛПР',  uniq(touches, a=>a.with_dm)],
+    ['Получили демо',   uniq(touches, a=>a.demo)],
+    ['Услышали цену',   uniq(sys, a=>a.status_to==='proposal_sent')],
+    ['Купили',          uniq(sys, a=>a.status_to==='won')],
+  ];
+  const demos={ general:cnt(touches,a=>a.demo==='general'), custom:cnt(touches,a=>a.demo==='custom') };
+
   S.report={
     kind, start:periodRange(S.period).start,
     who: who==='all' ? 'вся команда' : (S.staff.find(u=>u.id===who)?.name || S.prof.name),
@@ -2158,7 +2220,7 @@ async function loadReport(){
     won:won.length, lost:lost.length,
     setupSum:won.reduce((s,l)=>s+(l.setup_amount||0),0),
     mrrSum:won.reduce((s,l)=>s+(l.mrr_amount||0),0),
-    dmTouch, dmLeads, lostBy, cash, cashTotal, planLine,
+    dmTouch, dmLeads, lostBy, cash, cashTotal, planLine, conv, demos,
     pipeline:leads.filter(l=>leadMine(l)&&['proposal_sent','negotiation'].includes(l.status))
                   .reduce((s,l)=>s+(l.mrr_amount||0),0)
   };
@@ -2219,8 +2281,8 @@ function reportSVG(r){
   y+=chH+16;
 
   // воронка
-  const fn=[['Контакт установлен',r.contacted],['Бриф снят',r.brief],
-            ['КП отправлено',r.proposal],['На согласовании',r.nego],
+  const fn=[[STATUS.contacted,r.contacted],[STATUS.brief_done,r.brief],
+            [STATUS.proposal_sent,r.proposal],[STATUS.negotiation,r.nego],
             ['Продано',r.won],['Отказ',r.lost]];
   const fH=52+Math.ceil(fn.length/2)*38;
   box(32,y,W-64,fH);
@@ -2233,6 +2295,23 @@ function reportSVG(r){
     tx(x+(W-112)/2-24,yy,v,{s:18,w:600,m:true,a:'end',c:v?c:T.dim});
   });
   y+=fH+16;
+
+  // конверсия: каждая строка в процентах от предыдущей
+  const cv=r.conv||[];
+  if(cv.length){
+    const cH=52+cv.length*30;
+    box(32,y,W-64,cH);
+    tx(56,y+32,'КОНВЕРСИЯ ПО ЛИДАМ',{s:12,w:600,c:T.mut,ls:'1.4'});
+    tx(W-56,y+32,`демо: общих ${r.demos?.general||0} · индивидуальных ${r.demos?.custom||0}`,{s:12,c:T.dim,a:'end',m:true});
+    cv.forEach(([l,v],i)=>{
+      const yy=y+62+i*30, prev=i?cv[i-1][1]:0;
+      const pct = i && prev ? Math.round(v/prev*100)+'%' : '';
+      tx(56,yy,l,{s:15,c:T.txt});
+      tx(W-140,yy,v,{s:15,m:true,a:'end',c:v?T.txt:T.dim});
+      tx(W-56,yy,pct,{s:14,m:true,a:'end',c:!pct?T.dim:v/prev>=0.5?T.acc:T.warn});
+    });
+    y+=cH+16;
+  }
 
   // деньги
   box(32,y,W-64,180);
@@ -2448,7 +2527,20 @@ function bind(){
     const x=S.scripts.find(y=>y.id===b.dataset.openScript);
     if(isAdmin()) scriptEditor(x); else scriptSheet(null, x.kind==='script'?x.stage:undefined);
   });
-  document.querySelectorAll('[data-new-script]').forEach(b=>b.onclick=()=>scriptEditor(null));
+  document.querySelectorAll('[data-new-script]').forEach(b=>b.onclick=()=>scriptEditor(null, b.dataset.newScript));
+  const reloadSegs=async()=>{ S.segments=await db('segments?select=*&order=sort_order,name'); LS.set('boot',{...(LS.get('boot')||{}), segments:S.segments}); render(); };
+  document.querySelectorAll('[data-seg]').forEach(b=>b.onclick=async()=>{
+    const s=S.segments.find(x=>x.name===b.dataset.seg); if(!s) return;
+    try{ await db(`segments?name=eq.${encodeURIComponent(s.name)}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({active:!s.active})}); await reloadSegs(); }
+    catch(e){ toast(e.message,true); }
+  });
+  const segAdd=document.getElementById('seg_add');
+  if(segAdd) segAdd.onclick=async()=>{
+    const name=document.getElementById('seg_new').value.trim(); if(!name) return toast('Впиши название сегмента',true);
+    const order=Math.max(0,...S.segments.map(s=>s.sort_order))+10;
+    try{ await db('segments',{method:'POST',prefer:'return=minimal',body:JSON.stringify({name, sort_order:order})}); toast('Сегмент добавлен'); await reloadSegs(); }
+    catch(e){ toast(e.message.includes('duplicate')?'Такой сегмент уже есть':e.message,true); }
+  };
   document.querySelectorAll('[data-lesson]').forEach(b=>b.onclick=()=>{
     S.lesson=S.lessons.find(l=>l.id===b.dataset.lesson); if(S.lesson) go('lesson'); });
   const nl=document.querySelector('[data-new-lesson]'); if(nl) nl.onclick=()=>lessonEditor(null);
@@ -2484,7 +2576,7 @@ function bind(){
       const w1=+document.querySelector('[data-week="1"]')?.value||100;
       const g=k=>Math.ceil((+document.getElementById('nd_'+k).value||0)*w1/100);
       const el=document.getElementById('rs_prev');
-      if(el) el.textContent=`Новичок на 1-й неделе получит: звонки ${g('calls_day')}, разговоры ${g('talks_day')}, ЛПР ${g('dm_talks_day')}, брифы ${g('briefs_week')}, КП ${g('proposals_week')}`;
+      if(el) el.textContent=`Новичок на 1-й неделе получит: звонки ${g('calls_day')}, разговоры ${g('talks_day')}, ЛПР ${g('dm_talks_day')}, демо ${g('briefs_week')}, цена ${g('proposals_week')}`;
     };
     document.querySelectorAll('#nd_calls_day,#nd_talks_day,#nd_dm_talks_day,#nd_briefs_week,#nd_proposals_week,[data-week]').forEach(i=>i.oninput=preview);
     preview();
