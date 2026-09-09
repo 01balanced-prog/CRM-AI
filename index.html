@@ -307,11 +307,6 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 #rep{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--ink);max-width:760px;margin:0 auto}
 #rep svg{display:block;width:100%;height:auto}
 
-/* ============ ДЕСКТОП ============ */
-/* Приложение под телефон, но админ смотрит отчёт с компьютера. Шире 720px
-   интерфейс не растягиваем: текст не должен становиться плакатом. */
-#app,.nav,.dock,.toast,.sheet .inner{max-width:720px;margin-left:auto;margin-right:auto}
-
 /* ============ ВХОД ============ */
 .login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px}
 .logo{font-size:30px;font-weight:750;letter-spacing:-.035em;margin-bottom:4px}
@@ -1035,7 +1030,7 @@ function touchSheet(){
     <p style="margin:0 0 6px;color:var(--muted);font-size:13.5px">${esc(l.company_name)}</p>
 
     <label>Чем закончилось</label>
-    <div class="chips" id="oc">${['answered','no_answer','callback','sent','refused'].map((k,i)=>
+    <div class="chips" id="oc">${['answered','no_answer','callback','refused'].map((k,i)=>
       `<button class="chip ${i===0?'on':''}" data-v="${k}">${OUT[k]}</button>`).join('')}</div>
 
     <div id="talkBox">
@@ -1044,9 +1039,6 @@ function touchSheet(){
       <div id="stBox">
         <label>Что произошло</label>
         <div class="chips" id="stc">${NEXT_ST.map(k=>`<button class="chip" data-s="${k}">${STATUS[k]}</button>`).join('')}</div>
-        <label>Отправил демо</label>
-        <div class="chips" id="demo"><button class="chip on" data-v="">Нет</button>${Object.entries(DEMO).map(([k,v])=>
-          `<button class="chip" data-v="${k}">${v.replace(' демо','')}</button>`).join('')}</div>
       </div>
       <button class="more" id="ncBtn" type="button" style="margin-top:0">Узнал контакт: имя, должность, телефон</button>
       <div id="ncBox" hidden>
@@ -1063,6 +1055,12 @@ function touchSheet(){
         <input id="nc_phone" type="tel" inputmode="tel" placeholder="8 928 000-00-00">
         <label class="check"><input type="checkbox" id="nc_dm"> Это ЛПР — он принимает решение</label>
       </div>
+    </div>
+
+    <div id="demoBox">
+      <label>Отправил демо</label>
+      <div class="chips" id="demo"><button class="chip on" data-v="">Нет</button>${Object.entries(DEMO).map(([k,v])=>
+        `<button class="chip" data-v="${k}">${v.replace(' демо','')}</button>`).join('')}</div>
     </div>
 
     <div id="lostBox" style="display:none">
@@ -1115,9 +1113,8 @@ function touchSheet(){
     const on=b.classList.contains('on'); d.querySelectorAll('#sw .chip').forEach(c=>c.classList.remove('on')); if(!on) b.classList.add('on'); };
 
   // Статус живёт в чипах «Что произошло»; «Не взял» и «Отказ» ставят его сами
-  let stVal=l.status, chManual=false;
+  let stVal=l.status;
   const setSt=v=>{ stVal=v; d.querySelectorAll('#stc .chip').forEach(c=>c.classList.toggle('on',c.dataset.s===v)); sync(); };
-  const setCh=v=>d.querySelectorAll('#ch .chip').forEach(c=>c.classList.toggle('on',c.dataset.v===v));
   const gv=id=>$(id).querySelector('.chip.on')?.dataset.v;
   const sync=()=>{
     const o=gv('oc');
@@ -1135,20 +1132,24 @@ function touchSheet(){
     if(o==='no_answer' && ['new','no_answer'].includes(stVal)) stVal='no_answer';
     // Ответил или просил перезвонить — контакт есть. Закрытый лид (например, после пяти
     // недозвонов) при этом возвращается в работу, а не остаётся «Отказом» с чужой причиной
-    if((o==='answered'||o==='callback'||o==='sent') && ['new','no_answer','lost'].includes(stVal)) stVal='contacted';
+    if((o==='answered'||o==='callback') && ['new','no_answer','lost'].includes(stVal)) stVal='contacted';
     if(o==='refused') stVal='lost';
-    // «Отправлено» почти всегда WhatsApp: девять записей «Звонок · Отправлено» в журнале
-    if(!chManual) setCh(o==='sent' ? 'whatsapp' : 'call');
     setSt(stVal);
   }
+  // Исход описывает разговор, отправка описывается чипами демо. Для мессенджера
+  // «Не взял» звучит как «Без ответа» и уходит в базу исходом sent, а не недозвоном:
+  // недозвоны считаются в план и закрывают лид после пяти подряд.
+  const isMsg=()=>['whatsapp','instagram'].includes(gv('ch'));
+  const relabel=()=>{ $('oc').querySelector('[data-v="no_answer"]').textContent = isMsg() ? 'Без ответа' : OUT.no_answer; };
   d.querySelectorAll('#stc .chip').forEach(b=>b.onclick=()=>setSt(b.dataset.s));
   ['oc','dt','ch','demo'].forEach(id=>{ const w=$(id);
     w.onclick=e=>{ const b=e.target.closest('[data-v],[data-d]'); if(!b) return;
       w.querySelectorAll('.chip').forEach(c=>c.classList.remove('on')); b.classList.add('on');
       if(b.dataset.d!=null) $('nd').value = plusDays(+b.dataset.d);
       if(id==='oc') autoStatus(b.dataset.v);
-      if(id==='ch') chManual=true;
-      // Отправил демо — значит, «Демо получил», если лид ещё не дальше по воронке
+      if(id==='ch') relabel();
+      // Отправил демо — значит, «Демо получил», если лид ещё не дальше по воронке.
+      // Работает и при «Не взял»: не дозвонился, отправил видео в WhatsApp
       if(id==='demo' && b.dataset.v && ['new','no_answer','contacted'].includes(stVal)) setSt('brief_done');
     }; });
   autoStatus('answered'); // исход по умолчанию тоже подчиняется правилу, а не только нажатие
@@ -1181,7 +1182,7 @@ function touchSheet(){
       // правило (нет даты, нет причины), не останется ни касания, ни полустатуса.
       const r = await rpc('log_touch', lastTouchArgs = {
         client_id:clientId, lead_id:S.lead.id,
-        channel:gv('ch'), outcome:gv('oc'), status,
+        channel:gv('ch'), outcome: gv('oc')==='no_answer' && isMsg() ? 'sent' : gv('oc'), status,
         spoke_with: gv('oc')==='no_answer' ? null : (gv('sw')||null),
         with_dm: gv('oc')!=='no_answer' && ['manager','owner'].includes(gv('sw')), comment:cm||null,
         next_action_at:patch.next_action_at, next_action:patch.next_action,
@@ -1189,7 +1190,7 @@ function touchSheet(){
         contact: hasNc ? {name:nc.name||null, position:nc.position||null,
                           phone:nc.phone, phone_raw:nc.raw||null, dm:nc.dm} : null,
         script_id:S.callScript?.script_id||null, objection_id:S.callScript?.objection_id||null,
-        demo: gv('oc')==='no_answer' ? null : (gv('demo')||null) });
+        demo: gv('demo')||null });
       d.remove(); await openLead(S.lead.id, false);
       if(r?.auto_closed) toast('Записано. Пять недозвонов подряд — лид закрыт',
         false, {label:'Следующий →', fn:nextLead});
@@ -2247,6 +2248,140 @@ async function loadReport(){
 }
 
 function reportSVG(r){
+  // Одна колонка: так отчёт читается на телефоне и уходит картинкой в мессенджер.
+  // Для широкого экрана есть reportSVGWide, там те же цифры в два столбца.
+  const W=760;
+  const T={ink:'#080808',card:'#141414',line:'#262626',txt:'#F2F2F2',mut:'#8A8A8A',
+           dim:'#5C5C5C',acc:'#00E676',warn:'#FFB020',bad:'#FF5252'};
+  const F='-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif';
+  const M='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+  const e=t=>String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const nf=n=>new Intl.NumberFormat('ru-RU').format(n||0);
+  const per={today:'за сегодня',week:'за 7 дней',month:'за 30 дней'}[r.kind];
+  const dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
+
+  let y=0; const p=[];
+  const box=(x,yy,w,h,fill)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="14" fill="${fill||T.card}" stroke="${T.line}"/>`);
+  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c||T.txt}" font-family="${o.m?M:F}" font-size="${o.s||16}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
+
+  // шапка
+  p.push(`<rect x="0" y="0" width="${W}" height="112" fill="${T.ink}"/>`);
+  p.push(`<rect x="0" y="108" width="${W}" height="4" fill="${T.acc}"/>`);
+  tx(32,52,'balance',{s:30,w:700});
+  p.push(`<circle cx="150" cy="46" r="5" fill="${T.acc}"/>`);
+  tx(32,82,`Отчёт ${per} · ${r.who}`,{s:15,c:T.mut});
+  tx(W-32,52,dt,{s:15,c:T.mut,a:'end'});
+  y=144;
+
+  // три главных числа
+  const big=[[r.touches,'касаний',T.acc],
+             [r.rate==null?'—':r.rate+'%','дозвон',r.rate>=40?T.acc:T.warn],
+             [r.dmLeads,'вышли на ЛПР',T.txt]];
+  const bw=(W-64-24)/3;
+  big.forEach(([v,l,c],i)=>{
+    const x=32+i*(bw+12);
+    box(x,y,bw,104);
+    tx(x+bw/2,y+56,v,{s:38,w:600,c,a:'middle',m:true});
+    tx(x+bw/2,y+82,l,{s:14,c:T.mut,a:'middle'});
+  });
+  y+=124;
+  if(r.planLine){ tx(32,y+2,r.planLine,{s:14,c:T.mut,m:true}); y+=26; }
+
+  // каналы
+  const ch=[['Звонки',r.call],['WhatsApp',r.wa],['Instagram',r.ig],['Встречи',r.meet]];
+  const max=Math.max(1,...ch.map(c=>c[1]));
+  const chH=52+ch.length*34;
+  box(32,y,W-64,chH);
+  tx(56,y+32,'КАНАЛЫ',{s:12,w:600,c:T.mut,ls:'1.4'});
+  ch.forEach(([l,v],i)=>{
+    const yy=y+62+i*34;
+    tx(56,yy,l,{s:15,c:T.txt});
+    const bx=210, bw2=W-64-210-70;
+    p.push(`<rect x="${bx}" y="${yy-13}" width="${bw2}" height="16" rx="8" fill="${T.line}"/>`);
+    if(v) p.push(`<rect x="${bx}" y="${yy-13}" width="${Math.max(16,bw2*v/max)}" height="16" rx="8" fill="${T.acc}"/>`);
+    tx(W-56,yy,v,{s:15,m:true,a:'end',c:v?T.txt:T.dim});
+  });
+  y+=chH+16;
+
+  // воронка: строка на этап, справа раскладка по уровню контакта
+  const fn=[[STATUS.contacted,r.contacted,r.levels?.contacted],[STATUS.brief_done,r.brief,r.levels?.brief],
+            [STATUS.proposal_sent,r.proposal,r.levels?.proposal],[STATUS.negotiation,r.nego,r.levels?.nego],
+            ['Продано',r.won,r.levels?.won],['Отказ',r.lost,r.levels?.lost]];
+  const fH=52+fn.length*32;
+  box(32,y,W-64,fH);
+  tx(56,y+32,'ДВИЖЕНИЕ ПО ВОРОНКЕ',{s:12,w:600,c:T.mut,ls:'1.4'});
+  tx(W-56,y+32,'собств · управл · админ · никто',{s:12,c:T.dim,a:'end',m:true});
+  fn.forEach(([l,v,lv],i)=>{
+    const yy=y+64+i*32;
+    const c = l==='Продано'&&v ? T.acc : l==='Отказ'&&v ? T.bad : T.txt;
+    tx(56,yy,l,{s:15,c:T.mut});
+    tx(W-56-150,yy,v,{s:18,w:600,m:true,a:'end',c:v?c:T.dim});
+    if(lv) tx(W-56,yy,`${lv.owner} · ${lv.manager} · ${lv.admin} · ${lv.none}`,{s:14,m:true,a:'end',c:v?T.mut:T.dim});
+  });
+  y+=fH+16;
+
+  // конверсия: каждая строка в процентах от предыдущей
+  const cv=r.conv||[];
+  if(cv.length){
+    const cH=52+cv.length*30;
+    box(32,y,W-64,cH);
+    tx(56,y+32,'КОНВЕРСИЯ ПО ЛИДАМ',{s:12,w:600,c:T.mut,ls:'1.4'});
+    tx(W-56,y+32,`демо: общих ${r.demos?.general||0} · индивидуальных ${r.demos?.custom||0}`,{s:12,c:T.dim,a:'end',m:true});
+    cv.forEach(([l,v],i)=>{
+      const yy=y+62+i*30, prev=i?cv[i-1][1]:0;
+      const pct = i && prev ? Math.round(v/prev*100)+'%' : '';
+      tx(56,yy,l,{s:15,c:T.txt});
+      tx(W-140,yy,v,{s:15,m:true,a:'end',c:v?T.txt:T.dim});
+      tx(W-56,yy,pct,{s:14,m:true,a:'end',c:!pct?T.dim:v/prev>=0.5?T.acc:T.warn});
+    });
+    y+=cH+16;
+  }
+
+  // деньги
+  box(32,y,W-64,180);
+  tx(56,y+32,'ДЕНЬГИ',{s:12,w:600,c:T.mut,ls:'1.4'});
+  const mo=[['Поступило за период',nf(r.cash)+' ₽',r.cash?T.acc:T.dim],
+            ['Продано, внедрение',nf(r.setupSum)+' ₽',r.setupSum?T.acc:T.dim],
+            ['Продано, подписка',nf(r.mrrSum)+' ₽/мес',r.mrrSum?T.acc:T.dim],
+            ['Собрано всего',nf(r.cashTotal)+' ₽',T.txt],
+            ['В работе, подписка',nf(r.pipeline)+' ₽/мес',T.txt]];
+  mo.slice(0,3).forEach(([l,v,c],i)=>{
+    const x=56+i*((W-112)/3);
+    tx(x,y+70,l,{s:13,c:T.mut});
+    tx(x,y+96,v,{s:19,w:600,m:true,c});
+  });
+  p.push(`<line x1="56" y1="${y+118}" x2="${W-56}" y2="${y+118}" stroke="${T.line}"/>`);
+  mo.slice(3).forEach(([l,v,c],i)=>{
+    const x=56+i*((W-112)/3);
+    tx(x,y+142,l,{s:13,c:T.mut});
+    tx(x,y+166,v,{s:17,w:600,m:true,c});
+  });
+  y+=196;
+
+  // причины отказов
+  const reasons=Object.entries(r.lostBy);
+  if(reasons.length){
+    const rH=52+reasons.length*30;
+    box(32,y,W-64,rH);
+    tx(56,y+32,'ПОЧЕМУ ОТКАЗАЛИ',{s:12,w:600,c:T.mut,ls:'1.4'});
+    reasons.forEach(([k,v],i)=>{
+      const yy=y+62+i*30;
+      tx(56,yy,LOST[k]||k,{s:15,c:T.txt});
+      tx(W-56,yy,v,{s:15,m:true,a:'end',c:T.bad});
+    });
+    y+=rH+16;
+  }
+
+  tx(W/2,y+18,`Разговоров с ЛПР: ${r.dmTouch} · сформировано ${
+    new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`,
+    {s:13,c:T.dim,a:'middle'});
+  y+=44;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}">
+    <rect width="${W}" height="${y}" fill="${T.ink}"/>${p.join('')}</svg>`;
+}
+
+function reportSVGWide(r){
   // Плотная сетка: три числа, потом два столбца по два блока. На 760 px ширины
   // отчёт помещается в один экран компьютера и остаётся картинкой для мессенджера.
   const W=760, G=12, P=32, CW=(W-2*P-G)/2;
@@ -2374,7 +2509,7 @@ function reportScreen(){
   </div>`;
   if(S.busy||!S.report) return head+chips+`<div class="spin"></div>`;
   return head+chips+`<div class="wrap" style="padding-top:4px">
-    <div id="rep">${reportSVG(S.report)}</div>
+    <div id="rep">${(window.innerWidth>=900?reportSVGWide:reportSVG)(S.report)}</div>
     <button class="btn" id="save_png">Сохранить картинкой</button>
     <button class="btn ghost" id="share_png">Отправить</button>
     <p class="note">Картинка 760 пикселей шириной — читается в мессенджере без открытия.</p>
