@@ -1,0 +1,341 @@
+openapi: 3.0.3
+
+# ============================================================================
+# Balance CRM · внешнее чтение (свой коннектор для Composio)
+#
+# Импортируется в Composio как собственный коннектор (custom toolkit).
+# Все операции, кроме последней, только читают. Последняя нужна затем, чтобы
+# в любой момент показать: запись тем же ключом база отклоняет.
+#
+# Ключ — JWT с claim role = crm_readonly, выпущенный функцией
+# crm_readonly_token() (db/12_readonly.sql). У этой роли в базе есть только
+# select и только на перечисленные ниже таблицы.
+#
+# Порядок настройки — docs/composio-readonly.md
+# ============================================================================
+
+info:
+  title: Balance CRM (только чтение)
+  version: "1.0.0"
+  description: |
+    Лиды отдела продаж Balance: компания, ЛПР, статус, тариф, суммы внедрения
+    и подписки, этапы оплаты 30/30/40, журнал касаний.
+
+    Доступ односторонний. Ключ выпущен на роль базы `crm_readonly`, у которой
+    нет ни одного права на запись. Любой POST, PATCH или DELETE возвращает
+    403 с кодом `42501` — отказ приходит из Postgres, а не из приложения.
+
+    Наружу не отдаются: ручные цены (`custom_pricing`), приглашения, планы,
+    скрипты, уроки, прогресс обучения и замечания наставника.
+
+servers:
+  - url: https://wiokdxswbcmjdpalyrat.supabase.co/rest/v1
+    description: Balance CRM, Supabase Data API
+
+security:
+  - apikeyHeader: []
+    bearerAuth: []
+
+components:
+  securitySchemes:
+    apikeyHeader:
+      type: apiKey
+      in: header
+      name: apikey
+      description: >-
+        Публичный ключ проекта (`sb_publishable_…`, тот же что в index.html).
+        Шлюз Supabase требует здесь зарегистрированный ключ проекта и отбивает
+        самодельный JWT ещё до базы. Прав не даёт: роль определяет Authorization.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Ключ только на чтение в виде `Bearer <токен>`. Именно он определяет
+        роль в базе — `crm_readonly`.
+
+  parameters:
+    select:
+      name: select
+      in: query
+      required: false
+      description: Список колонок через запятую. По умолчанию отдаются все.
+      schema: { type: string }
+      example: company_name,status,tariff,mrr_amount
+    order:
+      name: order
+      in: query
+      required: false
+      description: Сортировка, `колонка.asc` или `колонка.desc`.
+      schema: { type: string }
+      example: next_action_at.asc
+    limit:
+      name: limit
+      in: query
+      required: false
+      description: Сколько строк вернуть.
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+    offset:
+      name: offset
+      in: query
+      required: false
+      description: Сколько строк пропустить.
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  schemas:
+    Lead:
+      type: object
+      description: Лид карточкой, как его видит менеджер в CRM.
+      properties:
+        id:             { type: string, format: uuid }
+        company_name:   { type: string, description: Название заведения }
+        segment:        { type: string, nullable: true, description: Сегмент, например «кафе» }
+        address:        { type: string, nullable: true }
+        status:
+          type: string
+          description: |
+            Статус сделки: `new` — новый, `no_answer` — не дозвонились,
+            `contacted` — поговорили, `brief_done` — сняли потребность,
+            `proposal_sent` — отправили предложение, `negotiation` — переговоры,
+            `won` — продано, `lost` — отказ.
+          enum: [new, no_answer, contacted, brief_done, proposal_sent, negotiation, won, lost]
+        owner_name:     { type: string, nullable: true, description: Ответственный менеджер }
+        tariff:         { type: string, nullable: true, description: Код тарифа }
+        setup_amount:   { type: number, nullable: true, description: Сумма внедрения, ₽ }
+        mrr_amount:     { type: number, nullable: true, description: Подписка в месяц, ₽ }
+        stage1_amount:  { type: number, nullable: true, description: Этап оплаты 1 (30%) }
+        stage2_amount:  { type: number, nullable: true, description: Этап оплаты 2 (30%) }
+        stage3_amount:  { type: number, nullable: true, description: Этап оплаты 3 (остаток) }
+        paid_total:     { type: number, description: Оплачено всего, ₽ }
+        paid_1_at:      { type: string, format: date-time, nullable: true }
+        paid_2_at:      { type: string, format: date-time, nullable: true }
+        paid_3_at:      { type: string, format: date-time, nullable: true }
+        next_action_at: { type: string, format: date, nullable: true, description: Дата следующего шага }
+        next_action:    { type: string, nullable: true }
+        lost_reason:
+          type: string
+          nullable: true
+          enum: [price, no_need, has_solution, unreachable, not_target, other]
+        dm_name:        { type: string, nullable: true, description: ЛПР }
+        dm_position:    { type: string, nullable: true }
+        dm_phone:       { type: string, nullable: true }
+        primary_phone:  { type: string, nullable: true }
+        score:          { type: integer, description: Приоритет от 0 до 13 }
+        touch_count:    { type: integer, description: Сколько было касаний }
+        last_touch_at:  { type: string, format: date-time, nullable: true }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
+
+    Error:
+      type: object
+      properties:
+        code:    { type: string, example: "42501" }
+        message: { type: string, example: permission denied for table leads }
+        details: { type: string, nullable: true }
+        hint:    { type: string, nullable: true }
+
+  responses:
+    Forbidden:
+      description: |
+        Отказ. Для операций записи это штатный и единственно верный ответ:
+        у ключа нет права на запись, Postgres возвращает `42501`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            code: "42501"
+            message: permission denied for table leads
+
+paths:
+
+  /v_leads:
+    get:
+      operationId: listLeads
+      summary: Лиды со всеми полями и статусами
+      description: |
+        Главный источник. Лид целиком: компания, ЛПР, статус, тариф, суммы,
+        этапы оплаты, дата следующего шага, число касаний.
+
+        Фильтр по любой колонке задаётся как `колонка=оператор.значение`,
+        например `status=eq.negotiation` или `mrr_amount=gte.15000`.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: status
+          in: query
+          required: false
+          description: 'Фильтр по статусу: `eq.new`, `eq.won`, `in.(negotiation,proposal_sent)`, `not.in.(won,lost)`.'
+          schema: { type: string }
+          example: eq.negotiation
+        - name: id
+          in: query
+          required: false
+          description: Один лид по идентификатору, `eq.<uuid>`.
+          schema: { type: string }
+        - name: company_name
+          in: query
+          required: false
+          description: Поиск по названию заведения, `ilike.*беркат*`.
+          schema: { type: string }
+        - name: owner_name
+          in: query
+          required: false
+          description: Фильтр по ответственному, `eq.Имя`.
+          schema: { type: string }
+        - name: next_action_at
+          in: query
+          required: false
+          description: 'Дата следующего шага: `lte.2026-09-30`.'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список лидов
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Lead' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /leads:
+    get:
+      operationId: listLeadsTable
+      summary: Таблица лидов без склейки с компанией
+      description: Сырая таблица `leads`, если нужны только поля сделки.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: status
+          in: query
+          required: false
+          schema: { type: string }
+          example: eq.new
+      responses:
+        '200':
+          description: Список строк таблицы
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      operationId: checkWriteRejected
+      summary: Проверка, что запись отклоняется
+      description: |
+        Операция существует ради проверки. Она обязана вернуть **403** и
+        `{"code":"42501","message":"permission denied for table leads"}`.
+
+        Если она когда-нибудь вернёт 201, ключ перестал быть ключом
+        только на чтение — доступ надо немедленно отозвать
+        (`revoke crm_readonly from authenticator;`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                company_id: { type: string, format: uuid }
+                status:     { type: string }
+            example:
+              company_id: 00000000-0000-0000-0000-000000000000
+              status: new
+      responses:
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '201':
+          description: Запись прошла. Так быть не должно — отзывать ключ.
+
+  /companies:
+    get:
+      operationId: listCompanies
+      summary: Заведения
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: name
+          in: query
+          required: false
+          description: Поиск по названию, `ilike.*кавказ*`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список заведений
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /contacts:
+    get:
+      operationId: listContacts
+      summary: Контакты заведений
+      description: Основной номер (`is_primary`) и ЛПР (`is_decision_maker`).
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: company_id
+          in: query
+          required: false
+          description: Контакты одного заведения, `eq.<uuid>`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список контактов
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /activities:
+    get:
+      operationId: listActivities
+      summary: Журнал касаний
+      description: |
+        Звонки, переписки и системные записи о смене статуса и оплате.
+        Журнал неизменяем и для сотрудников тоже.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: lead_id
+          in: query
+          required: false
+          description: Касания одного лида, `eq.<uuid>`.
+          schema: { type: string }
+        - name: created_at
+          in: query
+          required: false
+          description: 'Период: `gte.2026-09-01`.'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список касаний
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /tariffs:
+    get:
+      operationId: listTariffs
+      summary: Тарифы
+      description: Единственный источник сумм внедрения и подписки.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+      responses:
+        '200':
+          description: Список тарифов
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }

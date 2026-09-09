@@ -1,5 +1,5 @@
 -- ============================================================================
--- 12_demo.sql · Этап 6: воронка через демо и база знаний
+-- 14_demo.sql · Этап 6: воронка через демо и база знаний
 --
 --   Разбор журнала за август показал: до брифа и КП почти никто не доходит,
 --   ЛПР говорит «покажите», администратор «передаст». Воронка перестраивается:
@@ -147,6 +147,16 @@ drop policy if exists segments_admin on segments;
 create policy segments_admin on segments for all to authenticated
   using (is_admin()) with check (is_admin());
 grant select, insert, update, delete on segments to authenticated;
+
+-- Внешнее чтение (12_readonly.sql): роль crm_readonly видит справочник, писать не может.
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'crm_readonly') then
+    grant select on segments to crm_readonly;
+    drop policy if exists segments_ext_read on segments;
+    create policy segments_ext_read on segments for select to crm_readonly using (true);
+  end if;
+end $$;
 
 insert into segments (name, sort_order) values
   ('Суши', 10), ('Пицца', 20), ('Бургеры и фастфуд', 30), ('Шаурма', 40),
