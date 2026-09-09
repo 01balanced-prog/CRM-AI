@@ -304,8 +304,13 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .notice .go{margin-left:auto;color:var(--warn);font-weight:700;white-space:nowrap}
 
 /* ============ ОТЧЁТ ============ */
-#rep{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--ink)}
+#rep{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--ink);max-width:760px;margin:0 auto}
 #rep svg{display:block;width:100%;height:auto}
+
+/* ============ ДЕСКТОП ============ */
+/* Приложение под телефон, но админ смотрит отчёт с компьютера. Шире 720px
+   интерфейс не растягиваем: текст не должен становиться плакатом. */
+#app,.nav,.dock,.toast,.sheet .inner{max-width:720px;margin-left:auto;margin-right:auto}
 
 /* ============ ВХОД ============ */
 .login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px}
@@ -338,6 +343,10 @@ const STATUS = {
   negotiation:'На согласовании', won:'Клиент', lost:'Отказ'
 };
 const DEMO = { general:'Общее демо', custom:'Индивидуальное демо' };
+// Уровень контакта: с кем говорили. Этап описывает сделку, уровень описывает человека.
+// «Демо получил» у администратора и у собственника это разные вещи, и отчёт их различает.
+const LEVEL = { admin:'администратор', manager:'управляющий', owner:'собственник' };
+const LEVEL_SHORT = { admin:'адм', manager:'упр', owner:'соб' };
 const OPEN_ST = ['new','no_answer','contacted','brief_done','proposal_sent','negotiation'];
 const LOST = { price:'Дорого', no_need:'Нет потребности', has_solution:'Есть своё решение',
   unreachable:'Не дозвонились', not_target:'Не наш сегмент', other:'Другое' };
@@ -840,6 +849,7 @@ function row(l){
   if(late) bits.push(`<span class="late">просрочено ${human(l.next_action_at)}</span>`);
   else if(l.next_action_at) bits.push(esc(l.next_action||STATUS[l.status]));
   else bits.push(STATUS[l.status]);
+  if(l.level) bits.push(LEVEL[l.level]);
   if(l.segment) bits.push(esc(l.segment));
   if(l.mrr_amount) bits.push(money(l.mrr_amount)+'/мес');
   // «Ничей» помечаем в любом фильтре списка: в «Моих» ничьи лежат вперемешку с моими,
@@ -882,7 +892,7 @@ function leadScreen(){
   const wa = l.primary_phone ? `https://wa.me/${l.primary_phone.replace('+','')}` : null;
   const head=`<div class="topbar"><button class="back" data-back>‹</button>
     <h1>${esc(l.company_name)}<span class="sub">${STATUS[l.status]}${
-      l.lost_reason?' · '+LOST[l.lost_reason]:''}</span></h1></div>`;
+      l.lost_reason?' · '+LOST[l.lost_reason]:''}${l.level?' · '+LEVEL[l.level]:''}</span></h1></div>`;
 
   const acts=`<div class="actions">
     <a class="act primary" ${l.primary_phone?`href="tel:${l.primary_phone}"`:'disabled'}>
@@ -995,7 +1005,7 @@ function leadScreen(){
 // Заголовок касания в журнале: заметка без звонка так и называется
 function touchTitle(a){
   if(a.channel==='other' && a.outcome==='other') return /^Отложен/.test(a.comment||'') ? 'Отложен' : 'Заметка';
-  return `${CHAN[a.channel]||a.channel} · ${OUT[a.outcome]||''}${a.demo?' · '+DEMO[a.demo].toLowerCase():''}`;
+  return `${CHAN[a.channel]||a.channel} · ${OUT[a.outcome]||''}${a.spoke_with?' · '+LEVEL[a.spoke_with]:''}${a.demo?' · '+DEMO[a.demo].toLowerCase():''}`;
 }
 function ev(a){
   const cls = a.outcome==='answered'?'ok' : (a.outcome==='no_answer'||a.outcome==='refused')?'bad':'';
@@ -1029,7 +1039,8 @@ function touchSheet(){
       `<button class="chip ${i===0?'on':''}" data-v="${k}">${OUT[k]}</button>`).join('')}</div>
 
     <div id="talkBox">
-      <div class="chips" id="dm"><button class="chip" id="wdm" type="button">Говорил с ЛПР${l.dm_name?` · ${esc(l.dm_name)}`:''}</button></div>
+      <label>Говорил с</label>
+      <div class="chips" id="sw">${Object.entries(LEVEL).map(([k,v])=>`<button class="chip" data-v="${k}" type="button">${v}${k===(l.level||'')&&l.dm_name&&['manager','owner'].includes(k)?` · ${esc(l.dm_name)}`:''}</button>`).join('')}</div>
       <div id="stBox">
         <label>Что произошло</label>
         <div class="chips" id="stc">${NEXT_ST.map(k=>`<button class="chip" data-s="${k}">${STATUS[k]}</button>`).join('')}</div>
@@ -1099,7 +1110,9 @@ function touchSheet(){
 
   const toggle=(btn,box)=>{ btn.onclick=()=>{ box.hidden=!box.hidden; btn.classList.toggle('open',!box.hidden); }; };
   toggle($('moreBtn'),$('details')); toggle($('ncBtn'),$('ncBox'));
-  $('wdm').onclick=()=>$('wdm').classList.toggle('on');
+  // Один из трёх, повторное нажатие снимает: разговора с человеком могло и не быть
+  $('sw').onclick=e=>{ const b=e.target.closest('[data-v]'); if(!b) return;
+    const on=b.classList.contains('on'); d.querySelectorAll('#sw .chip').forEach(c=>c.classList.remove('on')); if(!on) b.classList.add('on'); };
 
   // Статус живёт в чипах «Что произошло»; «Не взял» и «Отказ» ставят его сами
   let stVal=l.status, chManual=false;
@@ -1169,7 +1182,8 @@ function touchSheet(){
       const r = await rpc('log_touch', lastTouchArgs = {
         client_id:clientId, lead_id:S.lead.id,
         channel:gv('ch'), outcome:gv('oc'), status,
-        with_dm:$('wdm').classList.contains('on') && gv('oc')!=='no_answer', comment:cm||null,
+        spoke_with: gv('oc')==='no_answer' ? null : (gv('sw')||null),
+        with_dm: gv('oc')!=='no_answer' && ['manager','owner'].includes(gv('sw')), comment:cm||null,
         next_action_at:patch.next_action_at, next_action:patch.next_action,
         lost_reason:patch.lost_reason||null, tariff:patch.tariff,
         contact: hasNc ? {name:nc.name||null, position:nc.position||null,
@@ -2162,6 +2176,7 @@ async function loadReport(){
   // Журнал виден всей команде, поэтому менеджер считает только себя: иначе его
   // «отчёт за сегодня» покажет чужие касания под подписью «вся команда»
   const who = isAdmin() ? S.repWho : S.prof.id;
+  const byLead=new Map(leads.map(l=>[l.id,l]));
   const mine=a=>who==='all' || a.author_id===who;
   const leadMine=l=>who==='all' || l.owner_id===who;
 
@@ -2171,8 +2186,11 @@ async function loadReport(){
   const cnt=(arr,f)=>arr.filter(f).length;
   const chan=k=>cnt(touches,a=>a.channel===k);
 
-  // Движение по воронке считаем по системным записям смены статуса
+  // Движение по воронке считаем по системным записям смены статуса.
+  // Рядом раскладка по уровню контакта лида: собственник / управляющий / администратор / никто
   const moved=t=>cnt(sys,a=>a.status_to===t);
+  const byLevel=t=>{ const o={owner:0,manager:0,admin:0,none:0};
+    sys.filter(a=>a.status_to===t).forEach(a=>{ o[byLead.get(a.lead_id)?.level||'none']++; }); return o; };
 
   const closedIn=st=>leads.filter(l=>l.status===st && leadMine(l) &&
     sys.some(a=>a.lead_id===l.id && a.status_to===st));
@@ -2218,6 +2236,8 @@ async function loadReport(){
     contacted:moved('contacted'), brief:moved('brief_done'),
     proposal:moved('proposal_sent'), nego:moved('negotiation'),
     won:won.length, lost:lost.length,
+    levels:{ contacted:byLevel('contacted'), brief:byLevel('brief_done'), proposal:byLevel('proposal_sent'),
+             nego:byLevel('negotiation'), won:byLevel('won'), lost:byLevel('lost') },
     setupSum:won.reduce((s,l)=>s+(l.setup_amount||0),0),
     mrrSum:won.reduce((s,l)=>s+(l.mrr_amount||0),0),
     dmTouch, dmLeads, lostBy, cash, cashTotal, planLine, conv, demos,
@@ -2227,7 +2247,9 @@ async function loadReport(){
 }
 
 function reportSVG(r){
-  const W=760;
+  // Плотная сетка: три числа, потом два столбца по два блока. На 760 px ширины
+  // отчёт помещается в один экран компьютера и остаётся картинкой для мессенджера.
+  const W=760, G=12, P=32, CW=(W-2*P-G)/2;
   const T={ink:'#080808',card:'#141414',line:'#262626',txt:'#F2F2F2',mut:'#8A8A8A',
            dim:'#5C5C5C',acc:'#00E676',warn:'#FFB020',bad:'#FF5252'};
   const F='-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif';
@@ -2237,121 +2259,103 @@ function reportSVG(r){
   const per={today:'за сегодня',week:'за 7 дней',month:'за 30 дней'}[r.kind];
   const dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
 
-  let y=0; const p=[];
-  const box=(x,yy,w,h,fill)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="14" fill="${fill||T.card}" stroke="${T.line}"/>`);
-  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c||T.txt}" font-family="${o.m?M:F}" font-size="${o.s||16}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
+  const p=[];
+  const box=(x,yy,w,h,fill)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="12" fill="${fill||T.card}" stroke="${T.line}"/>`);
+  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c||T.txt}" font-family="${o.m?M:F}" font-size="${o.s||14}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
+  const head=(x,yy,t,right)=>{ tx(x+20,yy+26,t,{s:11,w:600,c:T.mut,ls:'1.2'}); if(right) tx(x+CW-20,yy+26,right,{s:10.5,c:T.dim,a:'end',m:true}); };
 
   // шапка
-  p.push(`<rect x="0" y="0" width="${W}" height="112" fill="${T.ink}"/>`);
-  p.push(`<rect x="0" y="108" width="${W}" height="4" fill="${T.acc}"/>`);
-  tx(32,52,'balance',{s:30,w:700});
-  p.push(`<circle cx="150" cy="46" r="5" fill="${T.acc}"/>`);
-  tx(32,82,`Отчёт ${per} · ${r.who}`,{s:15,c:T.mut});
-  tx(W-32,52,dt,{s:15,c:T.mut,a:'end'});
-  y=144;
+  p.push(`<rect x="0" y="0" width="${W}" height="84" fill="${T.ink}"/>`);
+  p.push(`<rect x="0" y="80" width="${W}" height="3" fill="${T.acc}"/>`);
+  tx(P,42,'balance',{s:26,w:700});
+  p.push(`<circle cx="${P+102}" cy="37" r="4" fill="${T.acc}"/>`);
+  tx(P,64,`Отчёт ${per} · ${r.who}`,{s:13,c:T.mut});
+  tx(W-P,42,dt,{s:13,c:T.mut,a:'end'});
+  let y=100;
 
   // три главных числа
   const big=[[r.touches,'касаний',T.acc],
              [r.rate==null?'—':r.rate+'%','дозвон',r.rate>=40?T.acc:T.warn],
              [r.dmLeads,'вышли на ЛПР',T.txt]];
-  const bw=(W-64-24)/3;
+  const bw=(W-2*P-2*G)/3;
   big.forEach(([v,l,c],i)=>{
-    const x=32+i*(bw+12);
-    box(x,y,bw,104);
-    tx(x+bw/2,y+56,v,{s:38,w:600,c,a:'middle',m:true});
-    tx(x+bw/2,y+82,l,{s:14,c:T.mut,a:'middle'});
+    const x=P+i*(bw+G);
+    box(x,y,bw,78);
+    tx(x+bw/2,y+42,v,{s:30,w:600,c,a:'middle',m:true});
+    tx(x+bw/2,y+64,l,{s:12,c:T.mut,a:'middle'});
   });
-  y+=124;
-  if(r.planLine){ tx(32,y+2,r.planLine,{s:14,c:T.mut,m:true}); y+=26; }
+  y+=78+10;
+  if(r.planLine){ tx(P,y+6,r.planLine,{s:12,c:T.mut,m:true}); y+=20; }
+  y+=6;
 
-  // каналы
+  // левый столбец: каналы; правый: воронка с раскладкой по уровню контакта
   const ch=[['Звонки',r.call],['WhatsApp',r.wa],['Instagram',r.ig],['Встречи',r.meet]];
+  const fn=[[STATUS.contacted,r.contacted,r.levels?.contacted],[STATUS.brief_done,r.brief,r.levels?.brief],
+            [STATUS.proposal_sent,r.proposal,r.levels?.proposal],[STATUS.negotiation,r.nego,r.levels?.nego],
+            ['Продано',r.won,r.levels?.won],['Отказ',r.lost,r.levels?.lost]];
+  const rowH=27, blockH=44+fn.length*rowH+6;
+  const xL=P, xR=P+CW+G;
+  box(xL,y,CW,blockH); head(xL,y,'КАНАЛЫ');
   const max=Math.max(1,...ch.map(c=>c[1]));
-  const chH=52+ch.length*34;
-  box(32,y,W-64,chH);
-  tx(56,y+32,'КАНАЛЫ',{s:12,w:600,c:T.mut,ls:'1.4'});
   ch.forEach(([l,v],i)=>{
-    const yy=y+62+i*34;
-    tx(56,yy,l,{s:15,c:T.txt});
-    const bx=210, bw2=W-64-210-70;
-    p.push(`<rect x="${bx}" y="${yy-13}" width="${bw2}" height="16" rx="8" fill="${T.line}"/>`);
-    if(v) p.push(`<rect x="${bx}" y="${yy-13}" width="${Math.max(16,bw2*v/max)}" height="16" rx="8" fill="${T.acc}"/>`);
-    tx(W-56,yy,v,{s:15,m:true,a:'end',c:v?T.txt:T.dim});
+    const yy=y+44+i*rowH+16;
+    tx(xL+20,yy,l,{s:13.5});
+    const bx=xL+112, bw2=CW-112-56;
+    p.push(`<rect x="${bx}" y="${yy-11}" width="${bw2}" height="12" rx="6" fill="${T.line}"/>`);
+    if(v) p.push(`<rect x="${bx}" y="${yy-11}" width="${Math.max(12,bw2*v/max)}" height="12" rx="6" fill="${T.acc}"/>`);
+    tx(xL+CW-20,yy,v,{s:13.5,m:true,a:'end',c:v?T.txt:T.dim});
   });
-  y+=chH+16;
-
-  // воронка
-  const fn=[[STATUS.contacted,r.contacted],[STATUS.brief_done,r.brief],
-            [STATUS.proposal_sent,r.proposal],[STATUS.negotiation,r.nego],
-            ['Продано',r.won],['Отказ',r.lost]];
-  const fH=52+Math.ceil(fn.length/2)*38;
-  box(32,y,W-64,fH);
-  tx(56,y+32,'ДВИЖЕНИЕ ПО ВОРОНКЕ',{s:12,w:600,c:T.mut,ls:'1.4'});
-  fn.forEach(([l,v],i)=>{
-    const col=i%2, row=Math.floor(i/2);
-    const x=56+col*((W-112)/2), yy=y+66+row*38;
-    tx(x,yy,l,{s:15,c:T.mut});
+  box(xR,y,CW,blockH); head(xR,y,'ВОРОНКА','соб · упр · адм · никто');
+  fn.forEach(([l,v,lv],i)=>{
+    const yy=y+44+i*rowH+16;
     const c = l==='Продано'&&v ? T.acc : l==='Отказ'&&v ? T.bad : T.txt;
-    tx(x+(W-112)/2-24,yy,v,{s:18,w:600,m:true,a:'end',c:v?c:T.dim});
+    tx(xR+20,yy,l,{s:13.5,c:T.mut});
+    tx(xR+CW-88,yy,v,{s:15,w:600,m:true,a:'end',c:v?c:T.dim});
+    if(lv) tx(xR+CW-20,yy,`${lv.owner}·${lv.manager}·${lv.admin}·${lv.none}`,{s:11.5,m:true,a:'end',c:v?T.mut:T.dim});
   });
-  y+=fH+16;
+  y+=blockH+G;
 
-  // конверсия: каждая строка в процентах от предыдущей
+  // левый: конверсия по лидам; правый: деньги
   const cv=r.conv||[];
-  if(cv.length){
-    const cH=52+cv.length*30;
-    box(32,y,W-64,cH);
-    tx(56,y+32,'КОНВЕРСИЯ ПО ЛИДАМ',{s:12,w:600,c:T.mut,ls:'1.4'});
-    tx(W-56,y+32,`демо: общих ${r.demos?.general||0} · индивидуальных ${r.demos?.custom||0}`,{s:12,c:T.dim,a:'end',m:true});
-    cv.forEach(([l,v],i)=>{
-      const yy=y+62+i*30, prev=i?cv[i-1][1]:0;
-      const pct = i && prev ? Math.round(v/prev*100)+'%' : '';
-      tx(56,yy,l,{s:15,c:T.txt});
-      tx(W-140,yy,v,{s:15,m:true,a:'end',c:v?T.txt:T.dim});
-      tx(W-56,yy,pct,{s:14,m:true,a:'end',c:!pct?T.dim:v/prev>=0.5?T.acc:T.warn});
-    });
-    y+=cH+16;
-  }
-
-  // деньги
-  box(32,y,W-64,180);
-  tx(56,y+32,'ДЕНЬГИ',{s:12,w:600,c:T.mut,ls:'1.4'});
   const mo=[['Поступило за период',nf(r.cash)+' ₽',r.cash?T.acc:T.dim],
             ['Продано, внедрение',nf(r.setupSum)+' ₽',r.setupSum?T.acc:T.dim],
             ['Продано, подписка',nf(r.mrrSum)+' ₽/мес',r.mrrSum?T.acc:T.dim],
             ['Собрано всего',nf(r.cashTotal)+' ₽',T.txt],
             ['В работе, подписка',nf(r.pipeline)+' ₽/мес',T.txt]];
-  mo.slice(0,3).forEach(([l,v,c],i)=>{
-    const x=56+i*((W-112)/3);
-    tx(x,y+70,l,{s:13,c:T.mut});
-    tx(x,y+96,v,{s:19,w:600,m:true,c});
+  const block2H=44+Math.max(cv.length,mo.length)*rowH+6;
+  box(xL,y,CW,block2H); head(xL,y,'КОНВЕРСИЯ ПО ЛИДАМ',`демо ${r.demos?.general||0} общ · ${r.demos?.custom||0} инд`);
+  cv.forEach(([l,v],i)=>{
+    const yy=y+44+i*rowH+16, prev=i?cv[i-1][1]:0;
+    const pct = i && prev ? Math.round(v/prev*100)+'%' : '';
+    tx(xL+20,yy,l,{s:13.5});
+    tx(xL+CW-70,yy,v,{s:13.5,m:true,a:'end',c:v?T.txt:T.dim});
+    tx(xL+CW-20,yy,pct,{s:12,m:true,a:'end',c:!pct?T.dim:v/prev>=0.5?T.acc:T.warn});
   });
-  p.push(`<line x1="56" y1="${y+118}" x2="${W-56}" y2="${y+118}" stroke="${T.line}"/>`);
-  mo.slice(3).forEach(([l,v,c],i)=>{
-    const x=56+i*((W-112)/3);
-    tx(x,y+142,l,{s:13,c:T.mut});
-    tx(x,y+166,v,{s:17,w:600,m:true,c});
+  box(xR,y,CW,block2H); head(xR,y,'ДЕНЬГИ');
+  mo.forEach(([l,v,c],i)=>{
+    const yy=y+44+i*rowH+16;
+    tx(xR+20,yy,l,{s:13,c:T.mut});
+    tx(xR+CW-20,yy,v,{s:13.5,w:600,m:true,a:'end',c});
   });
-  y+=196;
+  y+=block2H+G;
 
   // причины отказов
   const reasons=Object.entries(r.lostBy);
   if(reasons.length){
-    const rH=52+reasons.length*30;
-    box(32,y,W-64,rH);
-    tx(56,y+32,'ПОЧЕМУ ОТКАЗАЛИ',{s:12,w:600,c:T.mut,ls:'1.4'});
+    const rH=44+reasons.length*rowH+6;
+    box(P,y,W-2*P,rH); tx(P+20,y+26,'ПОЧЕМУ ОТКАЗАЛИ',{s:11,w:600,c:T.mut,ls:'1.2'});
     reasons.forEach(([k,v],i)=>{
-      const yy=y+62+i*30;
-      tx(56,yy,LOST[k]||k,{s:15,c:T.txt});
-      tx(W-56,yy,v,{s:15,m:true,a:'end',c:T.bad});
+      const yy=y+44+i*rowH+16;
+      tx(P+20,yy,LOST[k]||k,{s:13.5});
+      tx(W-P-20,yy,v,{s:13.5,m:true,a:'end',c:T.bad});
     });
-    y+=rH+16;
+    y+=rH+G;
   }
 
-  tx(W/2,y+18,`Разговоров с ЛПР: ${r.dmTouch} · сформировано ${
+  tx(W/2,y+14,`Разговоров с ЛПР: ${r.dmTouch} · воронка: собственник · управляющий · администратор · без разговора · сформировано ${
     new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`,
-    {s:13,c:T.dim,a:'middle'});
-  y+=44;
+    {s:11.5,c:T.dim,a:'middle'});
+  y+=36;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}">
     <rect width="${W}" height="${y}" fill="${T.ink}"/>${p.join('')}</svg>`;
