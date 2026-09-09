@@ -18,15 +18,20 @@ info:
   title: Balance CRM (только чтение)
   version: "1.0.0"
   description: |
-    Лиды отдела продаж Balance: компания, ЛПР, статус, тариф, суммы внедрения
-    и подписки, этапы оплаты 30/30/40, журнал касаний.
+    CRM отдела продаж Balance целиком: лиды (компания, ЛПР, статус, уровень
+    контакта, тариф, суммы внедрения и подписки, этапы оплаты 30/30/40),
+    журнал касаний с заметками, скрипты и ответы на возражения, уроки,
+    нормы и показатели по сотрудникам.
 
     Доступ односторонний. Ключ выпущен на роль базы `crm_readonly`, у которой
     нет ни одного права на запись. Любой POST, PATCH или DELETE возвращает
     403 с кодом `42501` — отказ приходит из Postgres, а не из приложения.
 
-    Наружу не отдаются: ручные цены (`custom_pricing`), приглашения, планы,
-    скрипты, уроки, прогресс обучения и замечания наставника.
+    После `db/17_readonly_full.sql` наружу отдаётся вся база. Внутри есть
+    персональные данные сотрудников: чья норма, кто какой урок сдал, что
+    сказал наставник, чья почта в приглашении. Ключ хранить как пароль.
+    Отозвать все выпущенные ключи разом:
+    `revoke crm_readonly from authenticator;`
 
 servers:
   - url: https://wiokdxswbcmjdpalyrat.supabase.co/rest/v1
@@ -335,6 +340,293 @@ paths:
       responses:
         '200':
           description: Список тарифов
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # --------------------------------------------------------------------------
+  # Открыто файлом db/17_readonly_full.sql. До его применения каждый путь ниже
+  # отвечает 403 с кодом 42501.
+  # --------------------------------------------------------------------------
+
+  /scripts:
+    get:
+      operationId: listScripts
+      summary: Скрипты, возражения и шаблоны сообщений
+      description: |
+        Тексты, по которым работает менеджер: скрипты звонков (`kind=script`),
+        ответы на возражения (`kind=objection`), шаблоны сообщений в WhatsApp
+        (`kind=message`). Связываются с касаниями через `script_id`
+        и `objection_id`.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: kind
+          in: query
+          required: false
+          description: '`eq.script`, `eq.objection` или `eq.message`.'
+          schema: { type: string }
+        - name: stage
+          in: query
+          required: false
+          description: 'Этап разговора: `eq.first_call` и другие.'
+          schema: { type: string }
+        - name: active
+          in: query
+          required: false
+          description: 'Только включённые: `is.true`.'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список текстов
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /lessons:
+    get:
+      operationId: listLessons
+      summary: Уроки
+      description: Тексты уроков и вопросы к ним.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: module
+          in: query
+          required: false
+          description: '`eq.product`, `eq.sales` или `eq.crm`.'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список уроков
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /lesson_progress:
+    get:
+      operationId: listLessonProgress
+      summary: Сдача уроков
+      description: Кто какой урок сдал, когда и с каким счётом.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: Список сдач
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /coaching_notes:
+    get:
+      operationId: listCoachingNotes
+      summary: Замечания наставника
+      description: Замечания к касаниям и лидам.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: to_id
+          in: query
+          required: false
+          description: Замечания одному сотруднику, `eq.<uuid>`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список замечаний
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /plan_defaults:
+    get:
+      operationId: listPlanDefaults
+      summary: Норма по умолчанию
+      description: Звонки, разговоры, брифы, КП, сделки и деньги — норма на одного.
+      parameters:
+        - $ref: '#/components/parameters/select'
+      responses:
+        '200':
+          description: Одна строка нормы
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /ramp_steps:
+    get:
+      operationId: listRampSteps
+      summary: Разгон новичка
+      description: Какой процент нормы спрашивается на каждой неделе работы.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+      responses:
+        '200':
+          description: Ступени разгона
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /plans:
+    get:
+      operationId: listPlans
+      summary: Персональные планы
+      description: Норма конкретного сотрудника на конкретный месяц.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: profile_id
+          in: query
+          required: false
+          description: Один сотрудник, `eq.<uuid>`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список планов
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /custom_pricing:
+    get:
+      operationId: listCustomPricing
+      summary: Ручные цены
+      description: |
+        Лиды, которым админ назначил сумму мимо прайса. Обычно пусто: суммы
+        считает триггер из таблицы тарифов.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Список ручных цен
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /invites:
+    get:
+      operationId: listInvites
+      summary: Приглашения в отдел
+      description: Почта и роль приглашённого, отметка о том, что приглашение сработало.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Список приглашений
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v_team_today:
+    get:
+      operationId: listTeamToday
+      summary: План и факт отдела на сегодня
+      description: |
+        Каждый активный сотрудник: норма (`calls_day`, `talks_day`,
+        `briefs_week`, `won_month`, `cash_month`) рядом с фактом (`calls`,
+        `talks`, `dm_talks`, `taken`, `briefs`, `proposals`, `won`, `cash`).
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+      responses:
+        '200':
+          description: Строка на сотрудника
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v_kpi_day:
+    get:
+      operationId: listKpiDay
+      summary: Показатели по дням
+      description: Звонки, разговоры, разговоры с ЛПР и взятые лиды по дням.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - name: profile_id
+          in: query
+          required: false
+          description: Один сотрудник, `eq.<uuid>`.
+          schema: { type: string }
+        - name: day
+          in: query
+          required: false
+          description: 'Период: `gte.2026-09-01`.'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Строка на сотрудника и день
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v_kpi_week:
+    get:
+      operationId: listKpiWeek
+      summary: Показатели по неделям
+      description: Брифы и КП по неделям. Колонка периода — `week_start`.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - name: profile_id
+          in: query
+          required: false
+          description: Один сотрудник, `eq.<uuid>`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Строка на сотрудника и неделю
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v_kpi_month:
+    get:
+      operationId: listKpiMonth
+      summary: Показатели по месяцам
+      description: Сделки и деньги по месяцам. Колонка периода — `month`.
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - name: profile_id
+          in: query
+          required: false
+          description: Один сотрудник, `eq.<uuid>`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Строка на сотрудника и месяц
           content:
             application/json:
               schema: { type: array, items: { type: object } }
