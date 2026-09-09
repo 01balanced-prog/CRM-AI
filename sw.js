@@ -1,5 +1,5 @@
 // Balance CRM — кэш оболочки. Данные всегда берутся из сети.
-const V = 'balance-crm-v11';
+const V = 'balance-crm-v12';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
