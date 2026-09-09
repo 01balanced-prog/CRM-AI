@@ -5,8 +5,11 @@
 #
 #   sh integrations/composio/verify.sh '<ключ crm_readonly>'
 #
-# Тот же ключ, что подключён к коннектору в Composio. Шестнадцать чтений
-# обязаны вернуть 200, шесть попыток записи — 403 с кодом 42501. Итого 22.
+# Тот же ключ, что подключён к коннектору в Composio. Пятнадцать чтений
+# обязаны вернуть 200, шесть попыток записи — 403 с кодом 42501. Итого 21.
+#
+# custom_pricing здесь не проверяется: таблица есть в 00_baseline.sql, но
+# в живой базе её никогда не заводили — клиент ручные цены не использует.
 # ============================================================================
 
 set -e
@@ -49,6 +52,7 @@ call 200 'тарифы'              "$API/tariffs?select=code,title,setup_amoun
 
 # Открыто файлом 17_readonly_full.sql. Если эти строки дают 403 с кодом 42501,
 # миграция не применена: выполнить db/17_readonly_full.sql в SQL Editor.
+# Ответ 404 означает, что объекта в живой базе нет — это не отказ в правах.
 call 200 'скрипты и возражения' "$API/scripts?select=kind,stage,title,body&limit=3"
 call 200 'уроки'               "$API/lessons?select=module,title&limit=3"
 call 200 'сдача уроков'        "$API/lesson_progress?select=profile_id,lesson_id,score&limit=3"
@@ -56,7 +60,6 @@ call 200 'замечания наставника' "$API/coaching_notes?select=t
 call 200 'норма по умолчанию'  "$API/plan_defaults?select=calls_day,talks_day,cash_month"
 call 200 'разгон по неделям'   "$API/ramp_steps?select=week,pct&order=week.asc"
 call 200 'персональные планы'  "$API/plans?select=profile_id,month,calls_day&limit=3"
-call 200 'ручные цены'         "$API/custom_pricing?select=lead_id,setup_amount&limit=3"
 call 200 'приглашения'         "$API/invites?select=email,role,used_at&limit=3"
 call 200 'план и факт отдела'  "$API/v_team_today?select=name,calls,calls_day,won&limit=5"
 call 200 'показатели по дням'  "$API/v_kpi_day?select=profile_id,day,calls,talks&limit=5"
