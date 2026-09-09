@@ -106,6 +106,11 @@ create index if not exists leads_owner on leads (owner_id);
 create index if not exists leads_next on leads (next_action_at);
 
 -- Ручной прайс. Только админ. Перекрывает тариф для конкретного лида.
+-- В живой базе этой таблицы нет: она описана в AGENTS.md как способ дать
+-- ручную цену, но так и не была заведена, и клиент к ней не обращается
+-- ни разу. Здесь оставлена как часть задуманной схемы — при подъёме копии
+-- на локальном Postgres мешать не будет. Миграции, которые её касаются,
+-- обязаны проверять наличие: db/17_readonly_full.sql так и делает.
 create table if not exists custom_pricing (
   lead_id       uuid primary key references leads(id) on delete cascade,
   setup_amount  numeric(12,0) not null check (setup_amount >= 0),

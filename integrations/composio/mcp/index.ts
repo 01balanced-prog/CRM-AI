@@ -289,8 +289,20 @@ async function crm(key: string, path: string, init: RequestInit = {}, count = fa
   if (count && Number.isFinite(total) && Array.isArray(body)) {
     return { status: r.status, ok: r.ok, body: { всего: total, показано: body.length, строки: body } };
   }
-  if (!r.ok && (body as any)?.code === '42501' && (init.method ?? 'GET') === 'GET') {
-    return { status: r.status, ok: false, body: { ...(body as object), подсказка: HINT } };
+  if (!r.ok && (init.method ?? 'GET') === 'GET') {
+    const code = (body as any)?.code;
+    if (code === '42501') {
+      return { status: r.status, ok: false, body: { ...(body as object), подсказка: HINT } };
+    }
+    // 00_baseline.sql — схема, восстановленная по коду клиента, а не выгрузка:
+    // часть объектов из него в живой базе так и не завели (custom_pricing
+    // клиент не использует вовсе). Пустой ответ честнее ошибки: спрашивали
+    // то, чего нет, а не упёрлись в права.
+    if (code === 'PGRST205' || code === '42P01') {
+      return { status: 200, ok: true,
+               body: { всего: 0, показано: 0, строки: [],
+                       примечание: 'Этого объекта в базе нет — в живой схеме он не заводился' } };
+    }
   }
   return { status: r.status, ok: r.ok, body };
 }
