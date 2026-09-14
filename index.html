@@ -87,6 +87,10 @@ a{color:var(--accent);text-decoration:none}
 .row .meta{font-size:12.5px;color:var(--muted);margin-top:3px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .meta .late{color:var(--danger);font-weight:600}
+/* Сдвиг этапа в отчёте «с кем работали» — своей строкой: в общей он не помещается
+   и обрезается многоточием, а это главное, что случилось с лидом за день */
+.row .move{font-size:12.5px;color:var(--accent);margin-top:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .call{
   flex:0 0 62px;display:grid;place-items:center;border-left:1px solid var(--line);
   background:var(--raised);color:var(--accent);
@@ -221,6 +225,12 @@ a{color:var(--accent);text-decoration:none}
 .ev .h{font-size:13.5px;font-weight:600}
 .ev .t{font-size:11.5px;color:var(--dim);font-family:var(--mono)}
 .ev .c{font-size:14px;color:var(--muted);margin-top:2px;white-space:pre-wrap}
+
+/* Текстовый отчёт: моноширинный, переносится по словам — читается и на телефоне,
+   и после копирования в мессенджер */
+.rtxt{font-family:var(--mono);font-size:12px;line-height:1.62;white-space:pre-wrap;
+  overflow-wrap:anywhere;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r);padding:14px 12px;margin:0 0 12px;color:var(--text)}
 
 /* ============ ФОРМЫ ============ */
 label{display:block;font-size:12px;color:var(--muted);margin:12px 0 5px;font-weight:600}
@@ -359,7 +369,7 @@ const IC = {
 
 const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
             data:[], stats:null, log:[], filter:'all', own:'mine', q:'',
-            busy:false, back:[], contacts:[], report:null, period:'today', repWho:'all',
+            busy:false, back:[], contacts:[], report:null, period:'today', repWho:'all', repTab:'sum',
             plan:null, streak:0, team:[], person:null, invites:[], defaults:null, ramp:[],
             scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null, segments:[] };
 
@@ -491,9 +501,27 @@ async function flushQueue(){
 }
 window.addEventListener('online', flushQueue);
 
-// Значение для фильтра PostgREST: в кавычках, чтобы запятые и скобки в поиске
-// не ломали запрос («Кафе (центр)», «Чай, кофе»)
+// Значение внутри логического дерева PostgREST — or(...), and(...) — берём в кавычки,
+// иначе запятая и скобка в названии («Кафе (центр)», «Чай, кофе») оборвут разбор.
+// Только внутри дерева: в обычном фильтре (company_name=ilike.…) кавычки не разбираются
+// и попадают прямо в строку поиска — сравнение перестаёт совпадать хоть с чем-нибудь.
 function pgq(v){ return '"'+String(v).replace(/["\\]/g,'\\$&')+'"'; }
+
+// Поиск по списку: название, имя ЛПР и телефон. Звёздочка PostgREST превращается
+// в % уже после снятия кавычек, поэтому шаблон собираем звёздочками.
+// Служебные для LIKE символы экранируем, чтобы «100%» искалось как «100%»,
+// а одинокий обратный слэш не ронял запрос ошибкой экранирования.
+function searchGroup(q){
+  const like = '*'+q.replace(/[\\%_]/g,'\\$&')+'*';
+  const v = pgq(like);
+  const parts = [`company_name.ilike.${v}`, `dm_name.ilike.${v}`];
+  const digits = q.replace(/\D/g,'');
+  if(digits.length>=3){
+    const d = pgq('*'+digits+'*');
+    parts.push(`primary_phone.ilike.${d}`, `dm_phone.ilike.${d}`);
+  }
+  return `or(${parts.join(',')})`;
+}
 
 /* ─────────── УТИЛИТЫ ─────────── */
 function digitVal(ch){
@@ -534,6 +562,11 @@ function human(s){
   if(k===0) return 'сегодня'; if(k===1) return 'вчера';
   if(k>1&&k<7) return `${k} дн. назад`;
   return d.toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
+}
+// Склонение числительных: 1 касание, 2 касания, 5 касаний
+function plural(n,one,few,many){
+  const a=Math.abs(n)%100, b=a%10;
+  return a>10&&a<20 ? many : b===1 ? one : b>1&&b<5 ? few : many;
 }
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -610,9 +643,13 @@ async function load(){
     let f='';
     if(S.filter==='open') f = `&status=in.(${OPEN_ST.join(',')})`;
     else if(S.filter!=='all') f = `&status=eq.${S.filter}`;
-    if(S.q) f += `&company_name=ilike.${encodeURIComponent(pgq('*'+S.q+'*'))}`;
-    if(S.own==='mine') f += `&or=(owner_id.eq.${S.prof.id},owner_id.is.null)`;
+    // Оба «или» — свой и поисковый — кладём в одно дерево and(...): два одинаковых
+    // параметра or= в адресе PostgREST разбирает неочевидно, вложенность документирована.
+    const groups=[];
+    if(S.own==='mine') groups.push(`or(owner_id.eq.${S.prof.id},owner_id.is.null)`);
     else if(S.own==='none') f += `&owner_id=is.null`;
+    if(S.q) groups.push(searchGroup(S.q));
+    if(groups.length) f += `&and=${encodeURIComponent('('+groups.join(',')+')')}`;
     S.data = await db(`v_leads?select=*${f}&order=score.desc,company_name.asc`);
   }
 }
@@ -792,7 +829,8 @@ function todayScreen(){
     ${S.team.filter(t=>t.profile_id!==S.prof.id).map(personRow).join('') ||
       '<p class="note" style="margin:0">Пока только вы. Пригласите людей во вкладке «Команда».</p>'}
   </div>` : '';
-  const foot = isAdmin() ? '' : `<button class="btn ghost" data-nav="report">Отчёт за сегодня</button>`;
+  const foot = `<button class="btn ghost" data-worked>С кем работали сегодня</button>
+    ${isAdmin() ? '' : `<button class="btn ghost" data-nav="report">Отчёт за сегодня</button>`}`;
   const q=queueGet().length;
   const queue = q ? `<button class="notice" id="q_retry"><b>Не отправлено</b> ${q===1?'1 касание':q+' касания'} — нет связи<span class="go">Повторить</span></button>` : '';
   const mk='exp-'+monthKey().slice(0,7);
@@ -868,7 +906,7 @@ function listScreen(){
   const o=[['mine','Мои'],['all','Все ответственные'],['none','Ничьи']];
   const head=`<div class="topbar"><h1>Лиды<span class="sub">${S.data.length} записей</span></h1></div>
   <div class="wrap" style="padding-bottom:0">
-    <input id="q" type="text" placeholder="Поиск по названию" value="${esc(S.q)}" style="margin-bottom:12px">
+    <input id="q" type="text" placeholder="Поиск: название, ЛПР, телефон" value="${esc(S.q)}" style="margin-bottom:12px">
     <div class="chips">${o.map(([k,v])=>
       `<button class="chip ${S.own===k?'on':''}" data-o="${k}">${v}</button>`).join('')}</div>
     <div class="chips">${f.map(([k,v])=>
@@ -2227,7 +2265,30 @@ async function loadReport(){
   ];
   const demos={ general:cnt(touches,a=>a.demo==='general'), custom:cnt(touches,a=>a.demo==='custom') };
 
+  // С кем работали за период: лид попадает сюда, если его касались. Смену этапа
+  // подкладываем к тому же лиду — в текстовом отчёте она стоит рядом с касанием,
+  // ради которого её сделали, и видно, что именно сдвинуло сделку.
+  const wmap=new Map();
+  touches.forEach(a=>{
+    const lead=byLead.get(a.lead_id); if(!lead) return;
+    let w=wmap.get(a.lead_id);
+    if(!w){ w={lead, acts:[], touches:0}; wmap.set(a.lead_id, w); }
+    w.acts.push(a); w.touches++;
+  });
+  sys.forEach(a=>{ const w=wmap.get(a.lead_id); if(w && a.status_to) w.acts.push(a); });
+  const worked=[...wmap.values()];
+  const at=x=>x.created_at;
+  worked.forEach(w=>{
+    w.acts.sort((x,y)=> at(x)<at(y) ? -1 : at(x)>at(y) ? 1 : 0);
+    w.last=at(w.acts[w.acts.length-1]);
+  });
+  worked.sort((a,b)=> a.last<b.last ? 1 : a.last>b.last ? -1 : 0);
+
   S.report={
+    worked,
+    // Имя автора нужно только в общекомандном отчёте: у менеджера все касания свои
+    showAuthor: who==='all',
+    nameById: Object.fromEntries(S.staff.map(u=>[u.id,u.name])),
     kind, start:periodRange(S.period).start,
     who: who==='all' ? 'вся команда' : (S.staff.find(u=>u.id===who)?.name || S.prof.name),
     touches:touches.length,
@@ -2496,10 +2557,88 @@ function reportSVGWide(r){
     <rect width="${W}" height="${y}" fill="${T.ink}"/>${p.join('')}</svg>`;
 }
 
+/* ── ОТЧЁТ: С КЕМ РАБОТАЛИ ──
+   Не сводка цифрами, а поимённый список: кого касались за период, чем кончилось
+   последнее касание и сдвинулся ли этап. Строка открывает карточку. */
+const PERIOD_NAME = {today:'за сегодня', week:'за 7 дней', month:'за 30 дней'};
+
+function workedRow(w, r){
+  const l=w.lead;
+  const tt=w.acts.filter(a=>a.channel!=='system');
+  const last=tt[tt.length-1];
+  const moves=w.acts.filter(a=>a.channel==='system' && a.status_to && a.status_to!==a.status_from);
+  const mv=moves[moves.length-1];
+  const rail = l.status==='won' ? 'won' : l.status==='lost' ? 'lost' : mv ? 'due' : '';
+  // Время последнего касания, а не последней записи: смену этапа триггер пишет
+  // секундой позже, и строка показывала бы момент, когда трубку уже положили
+  const d=new Date(last ? last.created_at : w.last);
+  // За сегодня хватает часов; за неделю и месяц без даты не разобрать, когда это было
+  const when = (S.period==='today' ? '' : d.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})+' ')
+    + d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  const bits=[when];
+  if(last) bits.push(touchTitle(last));
+  const author = r.showAuthor && last ? (r.nameById[last.author_id]||'') : '';
+  if(author) bits.push(author.split(' ')[0]);
+  const move = mv ? `<div class="move">${esc(
+    `${STATUS[mv.status_from]||'—'} → ${STATUS[mv.status_to]||mv.status_to}`)}</div>` : '';
+  return `<div class="row">
+    <div class="rail ${rail}"></div>
+    <button class="body" data-lead="${l.id}">
+      <div class="nm">${esc(l.company_name)}<span class="sc">${w.touches}</span></div>
+      <div class="meta">${bits.map(esc).join(' · ')}</div>
+      ${move}
+    </button>
+    ${l.primary_phone?`<a class="call" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`:''}
+  </div>`;
+}
+
+function workedList(r){
+  if(!r.worked.length) return `<div class="empty"><div class="big">∅</div>
+    <p>Касаний ${PERIOD_NAME[S.period]} не было</p>
+    <p class="hint">Запиши касание в карточке лида — лид появится здесь</p></div>`;
+  const n=r.worked.length;
+  return `<p class="note" style="margin:0 0 10px">${n} ${plural(n,'лид','лида','лидов')} · ${
+    r.touches} ${plural(r.touches,'касание','касания','касаний')} · разговоров ${r.answered} из ${r.attempts}</p>`
+    + r.worked.map(w=>workedRow(w,r)).join('');
+}
+
+/* ── ОТЧЁТ: ЛЕНТА КАСАНИЙ ТЕКСТОМ ──
+   Для разбора дня: по каждому лиду касания подряд, с этапами и комментариями.
+   Комментарий — главное в этом отчёте, поэтому он отдельной строкой, не в хвосте. */
+function reportText(r){
+  const L=[`Касания ${PERIOD_NAME[S.period]} — ${r.who}`,
+    new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}),
+    `${r.worked.length} ${plural(r.worked.length,'лид','лида','лидов')} · ${
+      r.touches} ${plural(r.touches,'касание','касания','касаний')} · разговоров ${r.answered} из ${r.attempts}`,
+    ''];
+  if(!r.worked.length) return L.join('\n')+'Касаний не было.';
+  r.worked.forEach(w=>{
+    const l=w.lead;
+    L.push(`▪ ${l.company_name} — ${STATUS[l.status]}${l.lost_reason?', '+LOST[l.lost_reason]:''}${
+      l.level?', '+LEVEL[l.level]:''}`);
+    w.acts.forEach(a=>{
+      const t=new Date(a.created_at).toLocaleString('ru-RU',
+        {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+      if(a.channel==='system'){
+        L.push(`   ${t}  этап: ${STATUS[a.status_from]||'—'} → ${STATUS[a.status_to]||a.status_to}`);
+      }else{
+        const au = r.showAuthor ? ' · '+(r.nameById[a.author_id]||'—') : '';
+        L.push(`   ${t}  ${touchTitle(a)}${au}`);
+        if(a.comment) L.push(a.comment.split('\n').map(x=>'      '+x).join('\n'));
+      }
+    });
+    L.push('');
+  });
+  return L.join('\n').trim();
+}
+
 function reportScreen(){
+  const TAB={sum:'сводка', work:'с кем работали', log:'касания текстом'};
   const head=`<div class="topbar"><h1>Отчёт<span class="sub">${
-    {today:'за сегодня',week:'за 7 дней',month:'за 30 дней'}[S.period]}</span></h1></div>`;
+    PERIOD_NAME[S.period]} · ${TAB[S.repTab]}</span></h1></div>`;
   const chips=`<div class="wrap" style="padding-bottom:0">
+    <div class="chips">${[['sum','Сводка'],['work','Лиды'],['log','Касания']]
+      .map(([k,v])=>`<button class="chip ${S.repTab===k?'on':''}" data-rt="${k}">${v}</button>`).join('')}</div>
     <div class="chips">${[['today','Сегодня'],['week','7 дней'],['month','30 дней']]
       .map(([k,v])=>`<button class="chip ${S.period===k?'on':''}" data-p="${k}">${v}</button>`).join('')}</div>
     ${isAdmin()&&S.staff.length>1?`<div class="chips">
@@ -2508,12 +2647,18 @@ function reportScreen(){
         esc(u.name)}</button>`).join('')}</div>`:''}
   </div>`;
   if(S.busy||!S.report) return head+chips+`<div class="spin"></div>`;
-  return head+chips+`<div class="wrap" style="padding-top:4px">
-    <div id="rep">${(window.innerWidth>=900?reportSVGWide:reportSVG)(S.report)}</div>
-    <button class="btn" id="save_png">Сохранить картинкой</button>
-    <button class="btn ghost" id="share_png">Отправить</button>
-    <p class="note">Картинка 760 пикселей шириной — читается в мессенджере без открытия.</p>
-  </div>`;
+  const body = S.repTab==='work'
+    ? workedList(S.report)
+    : S.repTab==='log'
+    ? `<div class="rtxt" id="rep_txt">${esc(reportText(S.report))}</div>
+       <button class="btn" id="copy_txt">Скопировать текст</button>
+       <button class="btn ghost" id="share_txt">Отправить</button>
+       <p class="note">Этапы, исходы и комментарии подряд — чтобы перечитать день целиком.</p>`
+    : `<div id="rep">${(window.innerWidth>=900?reportSVGWide:reportSVG)(S.report)}</div>
+       <button class="btn" id="save_png">Сохранить картинкой</button>
+       <button class="btn ghost" id="share_png">Отправить</button>
+       <p class="note">Картинка 760 пикселей шириной — читается в мессенджере без открытия.</p>`;
+  return head+chips+`<div class="wrap" style="padding-top:4px">${body}</div>`;
 }
 
 // SVG → PNG прямо в браузере, без сторонних библиотек
@@ -2568,6 +2713,32 @@ function bind(){
   document.querySelectorAll('[data-o]').forEach(b=>b.onclick=()=>{ S.own=b.dataset.o; go('list'); });
   document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{ S.period=b.dataset.p; go('report',false); });
   document.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{ S.repWho=b.dataset.w; go('report',false); });
+  // Вкладка отчёта считается из уже загруженных данных: перезапрашивать нечего
+  document.querySelectorAll('[data-rt]').forEach(b=>b.onclick=()=>{ S.repTab=b.dataset.rt; render(); });
+  document.querySelectorAll('[data-worked]').forEach(b=>b.onclick=()=>{
+    S.period='today'; S.repTab='work'; go('report'); });
+
+  const cpt=document.getElementById('copy_txt');
+  if(cpt) cpt.onclick=async()=>{
+    const t=reportText(S.report);
+    try{ await navigator.clipboard.writeText(t); toast('Текст скопирован'); }
+    catch{
+      // Буфер бывает закрыт (нет https, отказ в разрешении): выделяем, копировать вручную
+      const el=document.getElementById('rep_txt');
+      const rg=document.createRange(); rg.selectNodeContents(el);
+      const sel=getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+      toast('Буфер недоступен: текст выделен, скопируй вручную', true);
+    }
+  };
+
+  const sht=document.getElementById('share_txt');
+  if(sht) sht.onclick=async()=>{
+    const t=reportText(S.report);
+    try{
+      if(navigator.share) await navigator.share({title:'Касания Balance', text:t});
+      else { await navigator.clipboard.writeText(t); toast('Отправка недоступна — текст скопирован'); }
+    }catch(e){ if(e.name!=='AbortError') toast(e.message,true); }
+  };
 
   const png=document.getElementById('save_png');
   if(png) png.onclick=async()=>{
