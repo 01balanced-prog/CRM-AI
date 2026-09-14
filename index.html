@@ -87,6 +87,7 @@ a{color:var(--accent);text-decoration:none}
 .row .meta{font-size:12.5px;color:var(--muted);margin-top:3px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .meta .late{color:var(--danger);font-weight:600}
+.row .meta .gap{color:var(--warn)}
 .row .call{
   flex:0 0 62px;display:grid;place-items:center;border-left:1px solid var(--line);
   background:var(--raised);color:var(--accent);
@@ -154,6 +155,9 @@ a{color:var(--accent);text-decoration:none}
 .act .ic{display:block;height:21px}
 .act.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:650}
 .act[disabled]{opacity:.32}
+.act i{font-style:normal;font-size:9px;color:var(--dim);line-height:1}
+/* Ссылки нет, кнопка ведёт в поиск: пунктир вместо сплошной рамки */
+.act.find{border-style:dashed}
 .act:active{transform:scale(.97)}
 
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
@@ -517,6 +521,84 @@ function fmtPhone(p){
   const d=p.replace(/\D/g,'');
   return d.length===11 ? `+7 ${d.slice(1,4)} ${d.slice(4,7)}-${d.slice(7,9)}-${d.slice(9)}` : p;
 }
+function hasDigit(s){ for(const ch of String(s||'')) if(digitVal(ch)!==null) return true; return false; }
+// Все номера из одной ячейки таблицы. В ячейке обычно не один номер: «8 928 …, 8 928 …»,
+// «8 928 … / 8 928 …», два номера просто через пробел, добавочный после слова «доб».
+// Буквы и знаки, которых в номере не бывает, режут ячейку на части; пробел, дефис,
+// скобки и плюс — нет. Часть, которая не разбирается на номера целиком, не берётся
+// вовсе: обрезанный номер в CRM хуже, чем строка из таблицы в заметке.
+function phones(raw){
+  const parts=[]; let cur='';
+  for(const ch of String(raw||'')){
+    const v=digitVal(ch);
+    if(v!==null){ cur+=v; continue; }
+    if(' \t\u00a0\u2007\u202f-–—+()'.includes(ch)) continue;
+    if(cur){ parts.push(cur); cur=''; }
+  }
+  if(cur) parts.push(cur);
+  const out=[];
+  for(const d of parts){
+    const got=[]; let i=0, ok=true;
+    while(i<d.length){
+      const take=((d[i]==='7'||d[i]==='8') && d.length-i>=11) ? 11 : 10;
+      const p=phone(d.slice(i,i+take));
+      if(!p){ ok=false; break; }
+      got.push(p); i+=take;
+    }
+    if(ok) for(const p of got) if(!out.includes(p)) out.push(p);
+  }
+  return out;
+}
+// Ссылка без «https://» в href уезжает на свой же домен: instagram.com/x
+// откроется как balance-crm/instagram.com/x. Дописываем протокол при показе.
+function withProto(u){
+  const s=String(u||'').trim();
+  if(!s) return '';
+  return /^https?:\/\//i.test(s) ? s : 'https://'+s.replace(/^\/+/,'');
+}
+// Instagram в таблицах пишут как угодно: ссылкой, «@ник», просто ником, без протокола.
+// Приводим к ссылке на профиль. Не похоже ни на ссылку, ни на ник — возвращаем null,
+// значение уйдёт в заметку.
+const IG_RE=/(?:https?:\/\/)?(?:[\w-]+\.)*(?:instagram\.com|instagr\.am)\/[^\s,;|]+/i;
+const IG_NOT=/^(p|reel|reels|stories|explore|tv|s|direct|accounts)$/i;
+function igUrl(v){
+  const s=String(v||'').trim();
+  if(!s) return null;
+  const link=s.match(IG_RE);
+  if(link){
+    const h=(link[0].split(/instagram\.com\/|instagr\.am\//i)[1]||'').split(/[/?#]/)[0];
+    return h && !IG_NOT.test(h) ? 'https://www.instagram.com/'+h : withProto(link[0]);
+  }
+  const h=s.replace(/^@/,'').replace(/\/+$/,'');
+  if(!/^[A-Za-z0-9._]{3,30}$/.test(h)) return null;
+  if(!/[A-Za-z]/.test(h)) return null;
+  if(/^(no|none|net|nan|null|yes|ok|http|https|www)$/i.test(h)) return null;
+  return 'https://www.instagram.com/'+h;
+}
+// Ссылку 2ГИС пишут и без «https://», и с лишним текстом рядом, и короткой (go.2gis.com).
+// Берём любую ссылку 2ГИС, в том числе на поиск: карточка пометит, куда она ведёт.
+const GIS_RE=/(?:https?:\/\/)?(?:[\w-]+\.)*2gis\.[a-z]{2,6}\/[^\s,;|]+/i;
+function gisUrl(v){
+  const s=String(v||'').trim();
+  if(!s) return null;
+  // Ячейка целиком ссылка: берём её целиком. В ссылке на поиск бывает пробел
+  // («/search/кафе уют») — по нему нельзя обрезать, иначе потеряется половина запроса.
+  if(/^(?:https?:\/\/)?(?:[\w-]+\.)*2gis\.[a-z]{2,6}\//i.test(s))
+    return withProto(s).replace(/ /g,'%20');
+  const link=s.match(GIS_RE);
+  if(link) return withProto(link[0]);
+  const any=s.match(/https?:\/\/\S+/i);
+  return any ? any[0] : null;
+}
+// Ссылки нет — ищем по названию. Instagram и 2ГИС находят заведение с первого раза,
+// менеджеру остаётся вставить найденную ссылку в карточку.
+function igSearchUrl(name){
+  return 'https://www.instagram.com/explore/search/keyword/?q='+encodeURIComponent(name||'');
+}
+// Город в ссылке задан: без него 2ГИС определяет его по сети и ищет не в Грозном
+function gisSearchUrl(name){
+  return 'https://2gis.ru/grozny/search/'+encodeURIComponent(name||'');
+}
 function money(n){ return n==null ? '—' : new Intl.NumberFormat('ru-RU').format(n)+' ₽'; }
 // Дата по местному времени, не по UTC: иначе с полуночи до трёх ночи по Грозному
 // «сегодня» превращается во вчера, и чипы дат в листе касания промахиваются.
@@ -609,6 +691,7 @@ async function load(){
   } else if(S.view==='list'){
     let f='';
     if(S.filter==='open') f = `&status=in.(${OPEN_ST.join(',')})`;
+    else if(S.filter==='nophone') f = `&primary_phone=is.null`;
     else if(S.filter!=='all') f = `&status=eq.${S.filter}`;
     if(S.q) f += `&company_name=ilike.${encodeURIComponent(pgq('*'+S.q+'*'))}`;
     if(S.own==='mine') f += `&or=(owner_id.eq.${S.prof.id},owner_id.is.null)`;
@@ -847,6 +930,7 @@ function row(l){
   if(l.level) bits.push(LEVEL[l.level]);
   if(l.segment) bits.push(esc(l.segment));
   if(l.mrr_amount) bits.push(money(l.mrr_amount)+'/мес');
+  if(!l.primary_phone) bits.push('<span class="gap">нет номера</span>');
   // «Ничей» помечаем в любом фильтре списка: в «Моих» ничьи лежат вперемешку с моими,
   // и без пометки их не отличить. Чужого владельца показываем только вне «Моих».
   const own = S.view!=='list' ? ''
@@ -864,7 +948,7 @@ function row(l){
 
 /* ── СПИСОК ── */
 function listScreen(){
-  const f=[['all','Все'],['open','В работе'],...Object.entries(STATUS)];
+  const f=[['all','Все'],['open','В работе'],['nophone','Без номера'],...Object.entries(STATUS)];
   const o=[['mine','Мои'],['all','Все ответственные'],['none','Ничьи']];
   const head=`<div class="topbar"><h1>Лиды<span class="sub">${S.data.length} записей</span></h1></div>
   <div class="wrap" style="padding-bottom:0">
@@ -885,6 +969,11 @@ function listScreen(){
 function leadScreen(){
   const l=S.lead; if(!l) return '';
   const wa = l.primary_phone ? `https://wa.me/${l.primary_phone.replace('+','')}` : null;
+  // Ссылки нет — кнопка открывает поиск по названию, а не висит мёртвой.
+  // Пунктир и подпись «поиск» говорят, что ссылка в карточке не заполнена.
+  const igFind = !l.instagram_url, gisFind = !l.gis_url || !/\/firm\//.test(l.gis_url);
+  const igLink  = l.instagram_url ? withProto(l.instagram_url) : igSearchUrl(l.company_name);
+  const gisLink = l.gis_url ? withProto(l.gis_url) : gisSearchUrl(l.company_name);
   const head=`<div class="topbar"><button class="back" data-back>‹</button>
     <h1>${esc(l.company_name)}<span class="sub">${STATUS[l.status]}${
       l.lost_reason?' · '+LOST[l.lost_reason]:''}${l.level?' · '+LEVEL[l.level]:''}</span></h1></div>`;
@@ -894,10 +983,10 @@ function leadScreen(){
       <span class="ic">${IC.phone}</span>Позвонить</a>
     <a class="act" ${wa?`href="${wa}" target="_blank" rel="noopener"`:'disabled'}>
       <span class="ic">${IC.chat}</span>WhatsApp</a>
-    <a class="act" ${l.instagram_url?`href="${esc(l.instagram_url)}" target="_blank" rel="noopener"`:'disabled'}>
-      <span class="ic">${IC.cam}</span>Instagram</a>
-    <a class="act" ${l.gis_url?`href="${esc(l.gis_url)}" target="_blank" rel="noopener"`:'disabled'}>
-      <span class="ic">${IC.pin}</span>${l.gis_url && !/\/firm\//.test(l.gis_url) ? '2ГИС поиск' : '2ГИС'}</a>
+    <a class="act ${igFind?'find':''}" href="${esc(igLink)}" target="_blank" rel="noopener">
+      <span class="ic">${IC.cam}</span>Instagram${igFind?'<i>поиск</i>':''}</a>
+    <a class="act ${gisFind?'find':''}" href="${esc(gisLink)}" target="_blank" rel="noopener">
+      <span class="ic">${IC.pin}</span>2ГИС${gisFind?'<i>поиск</i>':''}</a>
   </div>`;
 
   const kv=(k,v,num)=>v==null||v===''?'':`<div class="kv"><dt>${k}</dt><dd class="${num?'num':''}">${v}</dd></div>`;
@@ -1381,9 +1470,9 @@ function addScreen(){
     <label for="f_addr">Адрес</label>
     <input id="f_addr" type="text" value="${esc(l.address||'')}">
     <label for="f_ig">Instagram</label>
-    <input id="f_ig" type="text" inputmode="url" value="${esc(l.instagram_url||'')}" placeholder="https://instagram.com/…">
+    <input id="f_ig" type="text" inputmode="url" value="${esc(l.instagram_url||'')}" placeholder="@ник или ссылка">
     <label for="f_gis">2ГИС</label>
-    <input id="f_gis" type="text" inputmode="url" value="${esc(l.gis_url||'')}" placeholder="https://2gis.ru/…">
+    <input id="f_gis" type="text" inputmode="url" value="${esc(l.gis_url||'')}" placeholder="2gis.ru/… — можно без https">
     <label for="f_site">Сайт</label>
     <input id="f_site" type="text" inputmode="url" value="${esc(l.site_url||'')}">
     <div class="two">
@@ -1411,7 +1500,9 @@ async function saveLead(){
   if(!name) return toast('Впиши название',true);
   const btn=document.getElementById('save'); btn.disabled=true; btn.textContent='Сохраняю…';
   const co={ name, kind:document.getElementById('f_kind').value, segment:g('f_seg')||null,
-    address:g('f_addr')||null, instagram_url:g('f_ig')||null, gis_url:g('f_gis')||null,
+    address:g('f_addr')||null,
+    instagram_url: igUrl(g('f_ig')) || g('f_ig') || null,
+    gis_url: gisUrl(g('f_gis')) || g('f_gis') || null,
     site_url:g('f_site')||null, outlets_count:n('f_out'), avg_check:n('f_chk'),
     has_online_order:document.getElementById('f_oo').checked,
     has_own_app:document.getElementById('f_app').checked,
@@ -1981,6 +2072,9 @@ function importScreen(){
     скопируй и вставь сюда. Раскладываю по полям: Компания, Сегмент, Телефон, Instagram, 2ГИС, Заметка.
     Остальные колонки дописываю в заметку, чтобы ничего не потерялось. Число точек вытаскиваю
     из заметки, если оно там названо.</p>
+    <p class="note" style="margin:0 0 12px">Если у лидов не хватает номеров, Instagram или 2ГИС —
+    вставь ту же таблицу ещё раз. Пустые поля дозаполню, заполненное не перезапишу,
+    в заметке не продублируюсь.</p>
     <textarea id="paste" style="min-height:150px;font-family:var(--mono);font-size:13px"
       placeholder="Компания	Сегмент	Телефон	Instagram	2ГИС	Заметка"></textarea>
     <button class="btn ghost" id="prev">Разобрать</button>
@@ -2031,26 +2125,30 @@ function parsePaste(txt){
     if(nm.toLowerCase()===head[ix.name]){ skipped.header++; continue; }
 
     const raw=ix.ph>=0?(c[ix.ph]||'').trim():'';
-    // В одной ячейке может быть несколько номеров или добавочный.
-    // Берём первый разобранный, остальное не теряем — уйдёт в заметку.
-    let ph1=phone(raw), phRest='';
-    if(!ph1 && raw){
-      const parts=raw.split(/[\/,;|]|\sи\s/).map(x=>x.trim()).filter(Boolean);
-      for(const part of parts){
-        const t=phone(part);
-        if(t && !ph1) ph1=t;
-        else if(part && ph1) phRest += (phRest?', ':'') + part;
-      }
-    }
-    let ig=ix.ig>=0?(c[ix.ig]||'').trim():'';
-    let igBad='';
-    if(ig && !ig.includes('instagram.com')){ igBad=ig; ig=''; }
+    // В одной ячейке может быть несколько номеров или добавочный. Берём первый,
+    // остальные уйдут в заметку. Если не разобрался ни один, в заметку идёт вся
+    // ячейка: раньше такой номер пропадал молча, и лид оставался без связи.
+    const found=phones(raw);
+    const ph1=found[0]||null;
+    const phRest=found.slice(1).map(fmtPhone).join(', ');
+    const phBad=(!ph1 && hasDigit(raw)) ? raw : '';
 
-    // Ссылки 2ГИС берём только на карточку фирмы: /search/ открывает поиск, а не заведение
-    // Ссылку 2ГИС берём любую. Если это поиск, а не карточка фирмы —
-    // помечаем, чтобы менеджер не удивился, куда его отправили.
-    let gis=ix.gis>=0?(c[ix.gis]||'').trim():'';
-    if(gis && !/^https?:\/\//i.test(gis)) gis='';
+    // Ссылка может лежать не в своей колонке: в «Соцсетях», в «Ссылке», в заметке.
+    // Своя колонка разбирается снисходительно («@ник», ник, ссылка без протокола),
+    // по остальным ищем только явную ссылку, без догадок по никам.
+    const scan=re=>{ for(const cell of c){ const m=String(cell||'').match(re); if(m) return m[0]; } return null; };
+    const igRaw=ix.ig>=0?(c[ix.ig]||'').trim():'';
+    let ig=igUrl(igRaw);
+    if(!ig){ const u=scan(IG_RE); if(u) ig=igUrl(u); }
+    // То, что не стало ссылкой, не выбрасываем: уйдёт в заметку, менеджер разберётся
+    const igBad=(!ig && igRaw) ? igRaw : '';
+
+    // Ссылку 2ГИС берём любую, в том числе без «https://». Если это поиск,
+    // а не карточка фирмы — помечаем, чтобы менеджер не удивился, куда его отправили.
+    const gisRaw=ix.gis>=0?(c[ix.gis]||'').trim():'';
+    let gis=gisUrl(gisRaw);
+    if(!gis){ const u=scan(GIS_RE); if(u) gis=gisUrl(u); }
+    const gisBad=(!gis && gisRaw) ? gisRaw : '';
     const gisSearch = !!gis && !/\/firm\//.test(gis);
 
     // Всё, что не разложено по полям, дописываем в заметку, чтобы ничего не потерять
@@ -2062,16 +2160,28 @@ function parsePaste(txt){
       if(v && headRaw[i]) tail.push(`${headRaw[i]}: ${v}`);
     }
     // Всё, что не приняли в поле, всё равно сохраняем — пусть лежит в заметке
+    if(gisBad) tail.unshift(`${headRaw[ix.gis]}: ${gisBad}`);
     if(igBad)  tail.unshift(`${headRaw[ix.ig]}: ${igBad}`);
+    if(phBad)  tail.unshift(`Телефон из таблицы: ${phBad}`);
     if(phRest) tail.unshift(`Ещё телефон: ${phRest}`);
     if(tail.length) note = (note?note+'\n':'') + tail.join('. ');
 
     rows.push({ name:nm, segment:ix.seg>=0?(c[ix.seg]||'').trim()||null:null,
       raw, phone:ph1, instagram_url:ig||null, gis_url:gis||null,
-      outlets_count:outlets(note), gisSearch, note:note||null });
+      outlets_count:outlets(note), gisSearch, igBad, gisBad, phBad, note:note||null });
   }
   return {rows, skipped, map:ix, cols:headRaw,
           err:rows.length?null:'Ни одной строки с названием'};
+}
+
+// Дозаполнение заметки: дописываем только те строки, которых в ней ещё нет.
+// Повторная вставка той же таблицы — обычное дело, заметка не должна расти копиями.
+function noteMerge(have, add){
+  const cur=String(have||'').trim();
+  const lines=cur.split('\n').map(x=>x.trim());
+  const fresh=String(add||'').split('\n').map(x=>x.trim()).filter(x=>x && !lines.includes(x));
+  if(!fresh.length) return null;
+  return cur ? cur+'\n'+fresh.join('\n') : fresh.join('\n');
 }
 
 // Сверяет вставленное с тем, что уже в базе. Одним запросом, чтобы не долбить сеть.
@@ -2091,7 +2201,8 @@ async function matchExisting(rows){
     if(r.instagram_url && !ex.instagram_url) fills.push('Instagram');
     if(r.gis_url && !ex.gis_url) fills.push('2ГИС');
     if(r.outlets_count && !ex.outlets_count) fills.push('точки');
-    if(r.note && !(ex.note||'').includes(r.note)) fills.push('заметка');
+    r.noteNew = noteMerge(ex.note, r.note);
+    if(r.noteNew) fills.push('заметка');
     r.fills = fills;
     r.action = fills.length ? 'update' : 'same';
   }
@@ -2113,8 +2224,7 @@ async function runImport(rows){
         if(r.instagram_url && !ex.instagram_url) patch.instagram_url=r.instagram_url;
         if(r.gis_url && !ex.gis_url) patch.gis_url=r.gis_url;
         if(r.outlets_count && !ex.outlets_count) patch.outlets_count=r.outlets_count;
-        if(r.note && !(ex.note||'').includes(r.note))
-          patch.note = ex.note ? ex.note+'\n\n'+r.note : r.note;
+        if(r.noteNew) patch.note = r.noteNew;
         if(Object.keys(patch).length)
           await db(`companies?id=eq.${ex.id}`,{method:'PATCH',prefer:'return=minimal',
             body:JSON.stringify(patch)});
@@ -2803,12 +2913,16 @@ function bind(){
       return box.innerHTML=`<p class="note" style="color:var(--danger)">${esc(e.message)}</p>`; }
     prev.disabled=false; prev.textContent='Разобрать';
     const noPh=rows.filter(r=>!r.phone).length;
-    const badPh=rows.filter(r=>!r.phone && r.raw).length;
+    const badPh=rows.filter(r=>r.phBad).length;
     const gisS=rows.filter(r=>r.gisSearch).length;
+    const badIg=rows.filter(r=>r.igBad).length;
+    const badGis=rows.filter(r=>r.gisBad).length;
     const warn=[];
     if(sk.header) warn.push(`пропущено повторных строк заголовков: ${sk.header}`);
-    if(badPh) warn.push(`телефон не распознан: ${badPh}`);
+    if(badPh) warn.push(`телефон не распознан: ${badPh} — положу строку в заметку`);
     if(noPh-badPh) warn.push(`без телефона: ${noPh-badPh}`);
+    if(badIg) warn.push(`Instagram не распознан: ${badIg} — положу в заметку`);
+    if(badGis) warn.push(`2ГИС не распознан: ${badGis} — положу в заметку`);
     if(gisS) warn.push(`ссылок 2ГИС ведут на поиск, а не на карточку фирмы: ${gisS} — возьму, но кнопка откроет поиск`);
     const nNew=rows.filter(r=>r.action==='new').length;
     const nUpd=rows.filter(r=>r.action==='update').length;
