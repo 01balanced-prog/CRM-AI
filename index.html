@@ -317,6 +317,28 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 #rep{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--ink);max-width:760px;margin:0 auto}
 #rep svg{display:block;width:100%;height:auto}
 
+/* ============ НАСТРОЙКИ ============ */
+[hidden]{display:none!important}
+.drow{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line);min-height:56px}
+.drow:last-of-type{border-bottom:0}
+.drow.off .dmain b,.drow.off .tbt{color:var(--dim)}
+.dmain{flex:1;min-width:0;text-align:left;padding:9px 0}
+.dmain b{display:block;font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dmain span{display:block;font-size:12px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drow .tbt{flex:1;min-width:0;min-height:44px;padding:9px 11px;font-size:15px}
+.ord{display:flex;gap:4px;flex:0 0 auto}
+.obtn{width:44px;height:44px;border-radius:10px;background:var(--raised);border:1px solid var(--line);color:var(--muted);font-size:17px}
+.obtn[disabled]{opacity:.25}
+/* Кнопки листа прижаты к низу: «Сохранить» не уезжает под сгиб длинной формы */
+.sfoot{position:sticky;bottom:calc(-22px - env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 2fr;gap:8px;
+  margin:14px -16px 0;padding:10px 16px calc(12px + env(safe-area-inset-bottom));
+  background:var(--surface);border-top:1px solid var(--line);z-index:2}
+.sfoot .btn{margin:0}
+/* Режим выбора в списке */
+.row.picked{border-color:var(--accent)}
+.tickbox{flex:0 0 62px;display:grid;place-items:center;border-left:1px solid var(--line);
+  background:var(--raised);color:var(--accent);font-weight:700;font-size:20px}
+
 /* ============ ВХОД ============ */
 .login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px}
 .logo{font-size:30px;font-weight:750;letter-spacing:-.035em;margin-bottom:4px}
@@ -352,9 +374,23 @@ const DEMO = { general:'Общее демо', custom:'Индивидуально
 // «Демо получил» у администратора и у собственника это разные вещи, и отчёт их различает.
 const LEVEL = { admin:'администратор', manager:'управляющий', owner:'собственник' };
 const LEVEL_SHORT = { admin:'адм', manager:'упр', owner:'соб' };
-const OPEN_ST = ['new','no_answer','contacted','brief_done','proposal_sent','negotiation'];
 const LOST = { price:'Дорого', no_need:'Нет потребности', has_solution:'Есть своё решение',
   unreachable:'Не дозвонились', not_target:'Не наш сегмент', other:'Другое' };
+// Этапы и причины отказа правит админ в «Настройках» (db/18_settings.sql).
+// Константы выше — значения по умолчанию: пока миграция не выполнена или нет связи,
+// CRM работает на них. Коды new, no_answer, won, lost нужны базе и есть всегда.
+const FIXED_ST = ['new','no_answer','won','lost'];
+const STAGES_DEF = Object.entries(STATUS).map(([code,title],i)=>({ code, title, sort_order:(i+1)*10,
+  active:true, system:true, in_pipeline:['proposal_sent','negotiation'].includes(code),
+  script_stage:{ new:'first_call', no_answer:'callback', contacted:'first_call', brief_done:'brief',
+    proposal_sent:'after_proposal', negotiation:'closing', won:'closing' }[code]||null }));
+const LOST_DEF = Object.entries(LOST).map(([code,title],i)=>({code, title, sort_order:(i+1)*10, active:true, system:true}));
+// Форма касания: какие блоки показывать, в каком порядке и как подписать. Настраивает админ.
+const TOUCH_BLOCKS = { outcome:'Чем закончилось', level:'Говорил с', stage:'Что произошло',
+  contact:'Узнал контакт: имя, должность, телефон', demo:'Отправил демо', next:'Когда следующий шаг',
+  comment:'Комментарий', details:'Подробнее: канал, тариф, текст шага' };
+const TOUCH_DEF = { blocks:['outcome','level','stage','contact','demo','next','comment','details']
+  .map(id=>({id, on:id!=='demo', title:''})), days:[0,1,3,7,14,30], day:1 };
 const CHAN = { call:'Звонок', whatsapp:'WhatsApp', instagram:'Instagram',
   meeting:'Встреча', other:'Другое', system:'Система' };
 const OUT = { answered:'Ответил', no_answer:'Не взял', callback:'Просил перезвонить',
@@ -371,15 +407,58 @@ const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
             data:[], stats:null, log:[], filter:'all', own:'mine', q:'',
             busy:false, back:[], contacts:[], report:null, period:'today', repWho:'all', repTab:'sum',
             plan:null, streak:0, team:[], person:null, invites:[], defaults:null, ramp:[],
-            scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null, segments:[] };
+            scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null, segments:[],
+            stages:STAGES_DEF, lostReasons:LOST_DEF, touchCfg:TOUCH_DEF, dictsLive:false,
+            pick:null, qFocus:false };
+
+// Справочники из базы раскладываем по привычным объектам STATUS и LOST:
+// подписи в карточке, списке, отчёте и выгрузке меняются вместе с настройками.
+function applyDicts(){
+  const byOrder=(a,b)=>a.sort_order-b.sort_order || String(a.title).localeCompare(b.title);
+  S.stages=[...S.stages].sort(byOrder); S.lostReasons=[...S.lostReasons].sort(byOrder);
+  for(const k of Object.keys(STATUS)) delete STATUS[k];
+  S.stages.forEach(s=>STATUS[s.code]=s.title);
+  for(const k of Object.keys(LOST)) delete LOST[k];
+  S.lostReasons.forEach(r=>LOST[r.code]=r.title);
+}
+// Настройки формы касания поверх значений по умолчанию: новый блок из будущей
+// версии появится включённым, неизвестный из старой пропадёт.
+function touchCfg(raw){
+  const c=raw&&typeof raw==='object'?raw:{};
+  const saved=(Array.isArray(c.blocks)?c.blocks:[]).filter(b=>b&&TOUCH_BLOCKS[b.id]);
+  const blocks=[...saved.map(b=>({id:b.id, on:b.on!==false, title:String(b.title||'')})),
+    ...TOUCH_DEF.blocks.filter(d=>!saved.some(b=>b.id===d.id))];
+  const days=(Array.isArray(c.days)?c.days:TOUCH_DEF.days).map(Number)
+    .filter(n=>Number.isInteger(n)&&n>=0&&n<=365);
+  const uniq=[...new Set(days.length?days:TOUCH_DEF.days)].sort((a,b)=>a-b);
+  return { blocks, days:uniq, day:uniq.includes(+c.day)?+c.day:(uniq.includes(1)?1:uniq[0]) };
+}
+// Таблиц ещё нет (миграция 18 не выполнена) — молча остаёмся на значениях по умолчанию
+async function loadDicts(){
+  const safe=p=>db(p).catch(e=>{ if(isOffline(e)||e.auth) throw e; return null; });
+  const [st, lr, cfg] = await Promise.all([
+    safe('stages?select=*&order=sort_order,title'),
+    safe('lost_reasons?select=*&order=sort_order,title'),
+    safe('app_settings?key=eq.touch_form&select=value') ]);
+  S.dictsLive = !!st;
+  S.stages = st?.length ? st : STAGES_DEF;
+  S.lostReasons = lr?.length ? lr : LOST_DEF;
+  S.touchCfg = touchCfg(cfg?.[0]?.value);
+  applyDicts();
+}
+const stageOf = code => S.stages.find(s=>s.code===code);
+const tBlock = id => S.touchCfg.blocks.find(b=>b.id===id) || {id,on:true,title:''};
+const tTitle = id => tBlock(id).title || TOUCH_BLOCKS[id];
 
 const METRIC = { calls:'Звонки', talks:'Разговоры', dm_talks:'ЛПР', taken:'Взял в работу',
   briefs:'Демо', proposals:'Цена', won:'Сделки', cash:'Деньги' };
 const ROLE = { admin:'администратор', manager:'менеджер' };
 const STAGE = { first_call:'Первый звонок', gatekeeper:'Обход администратора', callback:'После недозвона',
   brief:'После демо', after_proposal:'После цены', closing:'Дожим' };
-const STAGE_BY_STATUS = { new:'first_call', no_answer:'callback', contacted:'brief', brief_done:'after_proposal',
-  proposal_sent:'after_proposal', negotiation:'closing', won:'closing', lost:'first_call' };
+// Какой скрипт открывать на этапе лида — задаётся у этапа в «Настройках».
+// Раньше соответствие было сдвинуто на шаг: «Контакт установлен» открывал
+// «Звонок после демо», а «Демо получил» — «Звонок после цены».
+const scriptStageFor = status => stageOf(status)?.script_stage || 'first_call';
 const MODULE = { product:'Продукт', sales:'Продажи', crm:'CRM' };
 const monthKey = d => { const x=d||new Date(); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-01`; };
 const monthName = d => new Date(d).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
@@ -598,20 +677,28 @@ async function boot(){
     const p = await db(`profiles?id=eq.${s.user.id}&select=*`);
     if(!p.length){ S.prof=null; LS.del('boot'); return render(); }
     S.prof = p[0];
-    [S.tariffs, S.segments] = await Promise.all([db('tariffs?select=*&order=sort_order'), db('segments?select=*&order=sort_order,name')]);
+    [S.tariffs, S.segments] = await Promise.all([db('tariffs?select=*&order=sort_order'), db('segments?select=*&order=sort_order,name'), loadDicts()]);
     if(S.prof.role==='admin') S.staff = await db('profiles?select=id,name,role,active,started_at,ramp_enabled&order=name');
-    LS.set('boot', {prof:S.prof, tariffs:S.tariffs, staff:S.staff, segments:S.segments});
+    saveBoot();
     S.offline=false;
     flushQueue();
     await load();
   }catch(e){
     if(isOffline(e) && cached?.prof){
       S.prof=cached.prof; S.tariffs=cached.tariffs||[]; S.staff=cached.staff||[]; S.segments=cached.segments||[]; S.offline=true;
+      if(cached.stages?.length) S.stages=cached.stages;
+      if(cached.lostReasons?.length) S.lostReasons=cached.lostReasons;
+      S.touchCfg=touchCfg(cached.touchCfg); applyDicts();
       toast('Нет связи. Показываю сохранённое, касания встанут в очередь');
     } else if(isOffline(e)){ S.offline=true; }
     else toast(e.message, true);
   }
   render();
+}
+
+function saveBoot(){
+  LS.set('boot', {prof:S.prof, tariffs:S.tariffs, staff:S.staff, segments:S.segments,
+    stages:S.stages, lostReasons:S.lostReasons, touchCfg:S.touchCfg});
 }
 
 async function load(){
@@ -635,13 +722,17 @@ async function load(){
   } else if(S.view==='norms'){
     const [d, r] = await Promise.all([db('plan_defaults?select=*'), db('ramp_steps?select=*&order=week')]);
     S.defaults=d[0]; S.ramp=r;
+  } else if(S.view==='settings'){
+    const [t, sg] = await Promise.all([db('tariffs?select=*&order=sort_order'),
+      db('segments?select=*&order=sort_order,name'), loadDicts()]);
+    S.tariffs=t; S.segments=sg; saveBoot();
   } else if(S.view==='learn'){
     await loadLearn();
   } else if(S.view==='report'){
     await loadReport();
   } else if(S.view==='list'){
     let f='';
-    if(S.filter==='open') f = `&status=in.(${OPEN_ST.join(',')})`;
+    if(S.filter==='open') f = `&status=not.in.(won,lost)`;
     else if(S.filter!=='all') f = `&status=eq.${S.filter}`;
     // Оба «или» — свой и поисковый — кладём в одно дерево and(...): два одинаковых
     // параметра or= в адресе PostgREST разбирает неочевидно, вложенность документирована.
@@ -675,13 +766,19 @@ async function popScreen(){
 
 async function openLead(id, push=true){
   if(push && S.view!=='lead') pushScreen();
-  S.busy=true; render();
+  S.busy=true; S.qFocus=false; render();
   try{
-    S.lead = (await db(`v_leads?id=eq.${id}&select=*`))[0];
-    S.log = await db(`activities?lead_id=eq.${id}&select=*&order=created_at.desc`);
+    // Параллельно: на плохой связи четыре запроса подряд — это секунды до карточки.
+    // Скрипты перечитываем каждый раз: иначе новый скрипт от админа менеджер
+    // увидит только после перезапуска приложения.
+    const [lead, log, scripts] = await Promise.all([
+      db(`v_leads?id=eq.${id}&select=*`),
+      db(`activities?lead_id=eq.${id}&select=*&order=created_at.desc`),
+      db('scripts?select=*&order=sort_order').catch(()=>S.scripts) ]);
+    S.lead=lead[0]; S.log=log; S.scripts=scripts;
+    if(!S.lead) throw new Error('Лид не найден: возможно, его удалили');
     S.contacts = await db(`contacts?company_id=eq.${S.lead.company_id}&select=*`
       + `&order=is_decision_maker.desc,is_primary.desc,created_at.asc`);
-    if(!S.scripts.length) S.scripts = await db('scripts?select=*&order=sort_order');
     S.callScript=null;
     S.view='lead';
   }catch(e){ toast(e.message,true); }
@@ -703,6 +800,7 @@ async function go(v, push=true){
   // Переход на любую основную вкладку сбрасывает стек: возвращаться некуда
   if(['today','list','more','team','learn'].includes(v)) S.back.length=0;
   else if(push && v!==S.view) pushScreen();
+  if(v!=='list'){ S.qFocus=false; S.pick=null; }
   S.view=v; S.busy=true; render();
   try{ await load(); }catch(e){ toast(e.message,true); }
   S.busy=false; render();
@@ -718,10 +816,16 @@ function render(){
   const v = { today:todayScreen, list:listScreen, lead:leadScreen, add:addScreen,
               more:moreScreen, imp:importScreen, report:reportScreen,
               team:teamScreen, person:personScreen, norms:normsScreen,
-              learn:learnScreen, lesson:lessonScreen }[S.view] || todayScreen;
-  app.className = (S.view==='lead' && S.lead && !S.busy) ? 'docked' : '';
+              learn:learnScreen, lesson:lessonScreen, settings:settingsScreen }[S.view] || todayScreen;
+  app.className = (S.view==='lead' && S.lead && !S.busy) || (S.view==='list' && S.pick) ? 'docked' : '';
   app.innerHTML = v() + navBar();
   bind();
+  // Поиск перерисовывает экран, и поле ввода создаётся заново. Возвращаем в него
+  // фокус и курсор, иначе клавиатура на телефоне закрывается после каждой паузы.
+  if(S.view==='list' && S.qFocus){
+    const q=document.getElementById('q');
+    if(q){ q.focus(); const n=q.value.length; try{ q.setSelectionRange(n,n); }catch{} }
+  }
 }
 
 function setupScreen(){
@@ -890,19 +994,24 @@ function row(l){
   const own = S.view!=='list' ? ''
     : !l.owner_name ? `<span class="sc none">ничей</span>`
     : S.own!=='mine' ? `<span class="sc who">${esc(l.owner_name.split(' ')[0])}</span>` : '';
-  return `<div class="row">
+  // Режим выбора в списке: строка отмечается, а не открывается
+  const pick = S.view==='list' && S.pick;
+  const on = pick && S.pick.has(l.id);
+  return `<div class="row ${on?'picked':''}">
     <div class="rail ${rail}"></div>
-    <button class="body" data-lead="${l.id}">
+    <button class="body" ${pick?`data-pick="${l.id}"`:`data-lead="${l.id}"`}>
       <div class="nm">${esc(l.company_name)}${l.kind==='channel'?' <span class="sc">канал</span>':''}<span class="sc">${l.score}</span>${own}</div>
       <div class="meta">${bits.join(' · ')}</div>
     </button>
-    ${l.primary_phone?`<a class="call" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`:''}
+    ${pick ? `<span class="tickbox" aria-hidden="true">${on?'✓':''}</span>`
+      : l.primary_phone?`<a class="call" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`:''}
   </div>`;
 }
 
 /* ── СПИСОК ── */
 function listScreen(){
-  const f=[['all','Все'],['open','В работе'],...Object.entries(STATUS)];
+  const f=[['all','Все'],['open','В работе'],
+    ...S.stages.filter(s=>s.active||s.code===S.filter).map(s=>[s.code,s.title])];
   const o=[['mine','Мои'],['all','Все ответственные'],['none','Ничьи']];
   const head=`<div class="topbar"><h1>Лиды<span class="sub">${S.data.length} записей</span></h1></div>
   <div class="wrap" style="padding-bottom:0">
@@ -916,7 +1025,16 @@ function listScreen(){
   const rows = S.data.length ? S.data.map(row).join('')
     : `<div class="empty"><div class="big">∅</div><p>Ничего не найдено</p>
        <p class="hint">Смени фильтр или добавь лид кнопкой «+»</p></div>`;
-  return head+`<div class="wrap" style="padding-top:0">${rows}</div>`;
+  // Админ раздаёт лиды пачкой: выбрать строки и назначить ответственного за один раз
+  const pickBtn = isAdmin() && S.data.length ? (S.pick
+    ? `<div class="two" style="margin-bottom:10px"><button class="btn ghost" id="pk_all" style="margin:0;height:44px">${
+        S.data.every(l=>S.pick.has(l.id))?'Снять все':'Выбрать все '+S.data.length}</button>
+       <button class="btn ghost" id="pk_off" style="margin:0;height:44px">Готово</button></div>`
+    : `<button class="btn ghost" id="pk_on" style="margin:0 0 10px;height:44px">Выбрать несколько</button>`) : '';
+  const bar = S.pick ? `<div class="dock" style="grid-template-columns:1fr">
+    <button class="btn" id="pk_go" ${S.pick.size?'':'disabled'}>${S.pick.size
+      ? `Назначить ответственного · ${S.pick.size}` : 'Отметь лиды в списке'}</button></div>` : '';
+  return head+`<div class="wrap" style="padding-top:0">${pickBtn}${rows}</div>${bar}`;
 }
 
 /* ── КАРТОЧКА ── */
@@ -1057,31 +1175,33 @@ function ev(a){
 // звонке: исход, ЛПР, что произошло, узнанный контакт, дата, комментарий.
 // Под «Подробнее» канал, тариф и текст следующего шага.
 let lastTouchArgs=null;
-const NEXT_ST=['contacted','brief_done','proposal_sent','negotiation','won'];
+// Подпись чипа даты по числу дней: админ задаёт в настройках просто числа
+function dayLabel(n){
+  return {0:'Сегодня',1:'Завтра',2:'Послезавтра',7:'Через неделю',14:'Через 2 недели',30:'Через месяц',
+    60:'Через 2 месяца',90:'Через 3 месяца'}[n] || `+${n} ${plural(n,'день','дня','дней')}`;
+}
 function touchSheet(){
   const l=S.lead;
   const clientId=uuid();
-  const d=document.createElement('div');
-  d.className='sheet';
-  d.innerHTML=`<div class="inner"><div class="grab"></div>
-    <h2 style="margin:0 0 4px;font-size:19px">Касание</h2>
-    <p style="margin:0 0 6px;color:var(--muted);font-size:13.5px">${esc(l.company_name)}</p>
-
-    <label>Чем закончилось</label>
-    <div class="chips" id="oc">${['answered','no_answer','callback','refused'].map((k,i)=>
-      `<button class="chip ${i===0?'on':''}" data-v="${k}">${OUT[k]}</button>`).join('')}</div>
-
-    <div id="talkBox">
-      <label>Говорил с</label>
-      <div class="chips" id="sw">${Object.entries(LEVEL).map(([k,v])=>`<button class="chip" data-v="${k}" type="button">${v}${k===(l.level||'')&&l.dm_name&&['manager','owner'].includes(k)?` · ${esc(l.dm_name)}`:''}</button>`).join('')}</div>
-      <div id="stBox">
-        <label>Что произошло</label>
-        <div class="chips" id="stc">${NEXT_ST.map(k=>`<button class="chip" data-s="${k}">${STATUS[k]}</button>`).join('')}</div>
-      </div>
-      <button class="more" id="ncBtn" type="button" style="margin-top:0">Узнал контакт: имя, должность, телефон</button>
+  const cfg=S.touchCfg;
+  // Этапы, на которые можно перейти из касания: все включённые, кроме «Новый»,
+  // «Не дозвонился» и «Отказ» — их ставят исход звонка и база
+  const nextSt=S.stages.filter(s=>s.active && !['new','no_answer','lost'].includes(s.code));
+  const lostList=S.lostReasons.filter(r=>r.active||r.code===l.lost_reason);
+  const tariffs=S.tariffs.filter(t=>t.active!==false||t.code===l.tariff);
+  const day0=cfg.day;
+  // Каждый блок — свой кусок разметки. Выключенный админом блок остаётся в листе
+  // скрытым: значение по умолчанию у него есть, логика листа не ломается.
+  const B={
+    outcome:`<label>${esc(tTitle('outcome'))}</label>
+      <div class="chips" id="oc">${['answered','no_answer','callback','refused'].map((k,i)=>
+        `<button class="chip ${i===0?'on':''}" data-v="${k}">${OUT[k]}</button>`).join('')}</div>`,
+    level:`<div id="swBox"><label>${esc(tTitle('level'))}</label>
+      <div class="chips" id="sw">${Object.entries(LEVEL).map(([k,v])=>`<button class="chip" data-v="${k}" type="button">${v}${k===(l.level||'')&&l.dm_name&&['manager','owner'].includes(k)?` · ${esc(l.dm_name)}`:''}</button>`).join('')}</div></div>`,
+    stage:`<div id="stBox"><label>${esc(tTitle('stage'))}</label>
+      <div class="chips" id="stc">${nextSt.map(s=>`<button class="chip" data-s="${s.code}">${esc(s.title)}</button>`).join('')}</div></div>`,
+    contact:`<div id="ncWrap"><button class="more" id="ncBtn" type="button">${esc(tTitle('contact'))}</button>
       <div id="ncBox" hidden>
-        <p class="note" style="margin:6px 0 0">Если на этом звонке дали телефон управляющего, собственника
-        или другого человека. Запишется в карточку, по нему можно будет позвонить в один тап.</p>
         <label for="nc_name">Имя</label>
         <input id="nc_name" type="text" placeholder="Как зовут">
         <label for="nc_pos">Должность</label>
@@ -1092,57 +1212,46 @@ function touchSheet(){
         <label for="nc_phone">Телефон</label>
         <input id="nc_phone" type="tel" inputmode="tel" placeholder="8 928 000-00-00">
         <label class="check"><input type="checkbox" id="nc_dm"> Это ЛПР — он принимает решение</label>
-      </div>
-    </div>
-
-    <div id="demoBox">
-      <label>Отправил демо</label>
+      </div></div>`,
+    demo:`<label>${esc(tTitle('demo'))}</label>
       <div class="chips" id="demo"><button class="chip on" data-v="">Нет</button>${Object.entries(DEMO).map(([k,v])=>
-        `<button class="chip" data-v="${k}">${v.replace(' демо','')}</button>`).join('')}</div>
-    </div>
-
+        `<button class="chip" data-v="${k}">${v.replace(' демо','')}</button>`).join('')}</div>`,
+    next:`<div id="nextBox"><label>${esc(tTitle('next'))}</label>
+      <div class="chips" id="dt">${cfg.days.map(n=>`<button class="chip ${n===day0?'on':''}" data-d="${n}">${dayLabel(n)}</button>`).join('')}</div>
+      <input type="date" id="nd" value="${plusDays(day0)}" min="${iso(new Date())}"></div>`,
+    comment:`<label for="cm">${esc(tTitle('comment'))}</label>
+      <textarea id="cm" placeholder="Что сказали. Можно надиктовать голосом"></textarea>`,
+    details:`<button class="more" id="moreBtn" type="button">${esc(tTitle('details'))}</button>
+      <div id="details" hidden>
+        <label>Канал</label>
+        <div class="chips" id="ch">${['call','whatsapp','instagram','meeting'].map((k,i)=>
+          `<button class="chip ${i===0?'on':''}" data-v="${k}">${CHAN[k]}</button>`).join('')}</div>
+        <label for="na">Что сделать следующим шагом</label>
+        <input type="text" id="na" placeholder="Перезвонить, уточнить решение" value="${esc(l.next_action||'')}">
+        <label>Тариф</label>
+        <select id="tf"><option value="">Не выбран</option>${tariffs.map(t=>
+          `<option value="${esc(t.code)}" ${t.code===l.tariff?'selected':''}>${esc(t.title)} · ${
+           money(t.setup_amount)} + ${money(t.mrr_amount)}/мес</option>`).join('')}</select>
+      </div>`,
+  };
+  const blocks=cfg.blocks.map(b=>`<div class="tblk" data-block="${b.id}" ${b.on?'':'hidden'}>${B[b.id]}</div>`).join('');
+  const d=document.createElement('div');
+  d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 2px;font-size:19px">Касание</h2>
+    <p style="margin:0 0 4px;color:var(--muted);font-size:13.5px">${esc(l.company_name)}</p>
+    ${blocks}
     <div id="lostBox" style="display:none">
       <label for="lr">Причина отказа</label>
-      <select id="lr">${Object.entries(LOST).map(([k,v])=>
-        `<option value="${k}" ${k===l.lost_reason?'selected':''}>${v}</option>`).join('')}</select>
+      <select id="lr">${lostList.map(r=>
+        `<option value="${esc(r.code)}" ${r.code===l.lost_reason?'selected':''}>${esc(r.title)}</option>`).join('')}</select>
     </div>
-
-    <div id="nextBox">
-      <label>Когда следующий шаг</label>
-      <div class="chips" id="dt">
-        <button class="chip" data-d="0">Сегодня</button>
-        <button class="chip on" data-d="1">Завтра</button>
-        <button class="chip" data-d="3">+3 дня</button>
-        <button class="chip" data-d="7">Через неделю</button>
-        <button class="chip" data-d="14">Через 2 недели</button>
-        <button class="chip" data-d="30">Через месяц</button>
-      </div>
-      <input type="date" id="nd" value="${plusDays(1)}" min="${iso(new Date())}">
-    </div>
-
-    <label for="cm">Комментарий</label>
-    <textarea id="cm" placeholder="Что сказали. Можно надиктовать голосом"></textarea>
-
     <p class="note" id="stHint" style="margin-top:10px"></p>
-
-    <button class="more" id="moreBtn" type="button">Подробнее: канал, тариф, следующий шаг</button>
-    <div id="details" hidden>
-      <label>Канал</label>
-      <div class="chips" id="ch">${['call','whatsapp','instagram','meeting'].map((k,i)=>
-        `<button class="chip ${i===0?'on':''}" data-v="${k}">${CHAN[k]}</button>`).join('')}</div>
-      <label for="na">Что сделать следующим шагом</label>
-      <input type="text" id="na" placeholder="Перезвонить, уточнить решение" value="${esc(l.next_action||'')}">
-      <label>Тариф</label>
-      <select id="tf"><option value="">Не выбран</option>${S.tariffs.map(t=>
-        `<option value="${t.code}" ${t.code===l.tariff?'selected':''}>${t.title} · ${
-         money(t.setup_amount)} + ${money(t.mrr_amount)}/мес</option>`).join('')}</select>
-    </div>
-
-    <button class="btn" id="save">Сохранить</button>
-    <button class="btn ghost" id="cancel">Отмена</button>
+    <div class="sfoot"><button class="btn ghost" id="cancel">Отмена</button><button class="btn" id="save">Сохранить</button></div>
   </div>`;
   document.body.appendChild(d);
   const $=id=>d.querySelector('#'+id);
+  const shown=id=>tBlock(id).on;
 
   const toggle=(btn,box)=>{ btn.onclick=()=>{ box.hidden=!box.hidden; btn.classList.toggle('open',!box.hidden); }; };
   toggle($('moreBtn'),$('details')); toggle($('ncBtn'),$('ncBox'));
@@ -1156,13 +1265,16 @@ function touchSheet(){
   const gv=id=>$(id).querySelector('.chip.on')?.dataset.v;
   const sync=()=>{
     const o=gv('oc');
-    $('talkBox').style.display = o==='no_answer' ? 'none' : 'block';
-    $('stBox').style.display = stVal==='lost' ? 'none' : 'block';
+    const talk = o!=='no_answer';
+    $('swBox').style.display = talk ? 'block' : 'none';
+    $('ncWrap').style.display = talk ? 'block' : 'none';
+    $('stBox').style.display = talk && stVal!=='lost' ? 'block' : 'none';
     $('lostBox').style.display = stVal==='lost' ? 'block' : 'none';
     $('nextBox').style.display = ['new','won','lost'].includes(stVal) ? 'none' : 'block';
+    const t=STATUS[stVal]||stVal;
     $('stHint').textContent = stVal===l.status
-      ? `Статус останется: ${STATUS[stVal]}`
-      : l.status==='lost' ? `Лид вернётся в работу: ${STATUS[stVal]}` : `Статус станет: ${STATUS[stVal]}`;
+      ? `Статус останется: ${t}`
+      : l.status==='lost' ? `Лид вернётся в работу: ${t}` : `Статус станет: ${t}`;
   };
   function autoStatus(o){
     // Передумал после «Отказ»: возвращаем исходный статус, иначе «Отказ» залипает
@@ -1186,8 +1298,7 @@ function touchSheet(){
       if(b.dataset.d!=null) $('nd').value = plusDays(+b.dataset.d);
       if(id==='oc') autoStatus(b.dataset.v);
       if(id==='ch') relabel();
-      // Отправил демо — значит, «Демо получил», если лид ещё не дальше по воронке.
-      // Работает и при «Не взял»: не дозвонился, отправил видео в WhatsApp
+      // Отправил демо — значит, «Демо получил», если лид ещё не дальше по воронке
       if(id==='demo' && b.dataset.v && ['new','no_answer','contacted'].includes(stVal)) setSt('brief_done');
     }; });
   autoStatus('answered'); // исход по умолчанию тоже подчиняется правилу, а не только нажатие
@@ -1200,9 +1311,13 @@ function touchSheet(){
     const status=stVal;
     const patch={ status, tariff:$('tf').value||null };
     // Ничейный лид при касании становится твоим — это делает база в log_touch
-    if(status==='lost') patch.lost_reason=$('lr').value;
+    if(status==='lost'){
+      patch.lost_reason=$('lr').value;
+      if(!patch.lost_reason){ toast('Выбери причину отказа',true); btn.disabled=false; btn.textContent='Сохранить'; return; }
+    }
     if(!['new','won','lost'].includes(status)){
-      patch.next_action_at=$('nd').value;
+      // Блок даты выключен в настройках — шаг ставится через день по умолчанию
+      patch.next_action_at = shown('next') ? $('nd').value : plusDays(day0);
       patch.next_action=$('na').value.trim()||'Связаться';
       if(!patch.next_action_at){ toast('Поставь дату следующего шага',true);
         btn.disabled=false; btn.textContent='Сохранить'; return; }
@@ -1210,7 +1325,8 @@ function touchSheet(){
     const nc={ name:$('nc_name').value.trim(), position:$('nc_pos').value.trim(),
                raw:$('nc_phone').value.trim(), dm:$('nc_dm').checked };
     nc.phone=phone(nc.raw);
-    const hasNc = !!(nc.name || nc.position || nc.phone);
+    const talk=gv('oc')!=='no_answer';
+    const hasNc = talk && !!(nc.name || nc.position || nc.phone);
     let cm=$('cm').value.trim();
     if(hasNc) cm = (cm?cm+'\n':'') + '▸ Контакт: '
       + [nc.name, nc.position, nc.phone?fmtPhone(nc.phone):nc.raw].filter(Boolean).join(', ');
@@ -1221,8 +1337,8 @@ function touchSheet(){
       const r = await rpc('log_touch', lastTouchArgs = {
         client_id:clientId, lead_id:S.lead.id,
         channel:gv('ch'), outcome: gv('oc')==='no_answer' && isMsg() ? 'sent' : gv('oc'), status,
-        spoke_with: gv('oc')==='no_answer' ? null : (gv('sw')||null),
-        with_dm: gv('oc')!=='no_answer' && ['manager','owner'].includes(gv('sw')), comment:cm||null,
+        spoke_with: talk ? (gv('sw')||null) : null,
+        with_dm: talk && ['manager','owner'].includes(gv('sw')), comment:cm||null,
         next_action_at:patch.next_action_at, next_action:patch.next_action,
         lost_reason:patch.lost_reason||null, tariff:patch.tariff,
         contact: hasNc ? {name:nc.name||null, position:nc.position||null,
@@ -1284,6 +1400,8 @@ function leadNoteSheet(){
     // Отложенный лид не может быть «Новым»: без статуса в работе база не хранит дату шага
     let status=l.status; if(days && status==='new') status='contacted';
     if(days && status==='lost'){ toast('Лид в отказе. Чтобы вернуть его в работу, запиши касание',true); btn.disabled=false; return; }
+    // У клиента нет следующего шага в очереди: база молча сбросила бы дату, а тост сказал бы «Отложен»
+    if(days && status==='won'){ toast('Лид уже клиент: откладывать нечего. Заметку можно сохранить без отсрочки',true); btn.disabled=false; return; }
     const args={ client_id:uuid(), lead_id:l.id, channel:'other', outcome:'other', status,
       with_dm:false, comment:(days?'Отложен. ':'')+text || null,
       next_action_at: days ? plusDays(+days) : l.next_action_at,
@@ -1486,6 +1604,11 @@ async function saveLead(){
     if(S.editing){
       await db(`companies?id=eq.${S.editing.company_id}`,{method:'PATCH',prefer:'return=minimal',
         body:JSON.stringify(co)});
+      // Поле телефона очистили — снимаем номер с основного контакта, а не молча оставляем старый
+      if(!g('f_phone') && S.editing.primary_phone){
+        await db(`contacts?company_id=eq.${S.editing.company_id}&is_primary=eq.true`,{method:'PATCH',prefer:'return=minimal',
+          body:JSON.stringify({phone_e164:null, phone_raw:null})});
+      }
       if(ph && ph!==S.editing.primary_phone){
         const cur=await db(`contacts?company_id=eq.${S.editing.company_id}&is_primary=eq.true&select=id`);
         if(cur.length) await db(`contacts?id=eq.${cur[0].id}`,{method:'PATCH',prefer:'return=minimal',
@@ -1509,11 +1632,14 @@ async function saveLead(){
 }
 
 /* ── СКРИПТ В ЗВОНКЕ ── */
-// Скрипт этапа: сначала для сегмента лида, иначе общий. Возражения общие.
-function pickScript(stage, lead){
+// Скрипты этапа: сначала для сегмента лида, потом общие. Скрипты чужого сегмента
+// лиду не показываем. Раньше выбирался один скрипт на этап, и второй скрипт того же
+// этапа в звонке не появлялся никогда — только в списке у админа.
+function stageScripts(stage, lead){
+  const seg=(lead?.segment||'').toLowerCase();
   const list=S.scripts.filter(x=>x.kind==='script' && x.active && x.stage===stage);
-  return list.find(x=>x.segment && lead?.segment && x.segment.toLowerCase()===lead.segment.toLowerCase())
-      || list.find(x=>!x.segment) || list[0] || null;
+  if(!lead) return list;
+  return [...list.filter(x=>x.segment && x.segment.toLowerCase()===seg), ...list.filter(x=>!x.segment)];
 }
 // Текст сообщения с подстановками, без разметки: уходит в WhatsApp как есть.
 // Без имени ЛПР «{лпр}, здравствуйте» превращается в «Здравствуйте».
@@ -1528,18 +1654,25 @@ function fill(text, lead){
 }
 function scriptSheet(lead, initialStage){
   const d=document.createElement('div'); d.className='sheet';
-  let stage = initialStage || STAGE_BY_STATUS[lead?.status] || 'first_call';
+  let stage = initialStage || (lead ? scriptStageFor(lead.status) : 'first_call');
+  let pickId = null;
   const objections=S.scripts.filter(x=>x.kind==='objection' && x.active);
   const msgs=S.scripts.filter(x=>x.kind==='message' && x.active);
   const ph = lead ? (lead.dm_phone||lead.primary_phone) : null;
   const h3=t=>`<h3 style="margin:14px 0 4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">${t}</h3>`;
   const draw=()=>{
-    const sc=pickScript(stage, lead);
+    const list=stageScripts(stage, lead);
+    const sc=list.find(x=>x.id===pickId) || list[0] || null;
     if(lead) S.callScript = { script_id: sc?.id||null, objection_id: S.callScript?.objection_id||null };
+    // Несколько скриптов на этапе — выбор чипами над текстом
+    const variants = list.length>1 ? `<div class="chips" style="padding-bottom:6px">${list.map(x=>
+      `<button class="chip ${x===sc?'on':''}" data-var="${x.id}">${esc(x.title)}${x.segment?' · '+esc(x.segment):''}</button>`).join('')}</div>` : '';
     d.innerHTML=`<div class="inner"><div class="grab"></div>
       <h2 style="margin:0 0 4px;font-size:19px">Скрипт</h2>
       <p style="margin:0 0 10px;color:var(--muted);font-size:13.5px">${lead?esc(lead.company_name):'Общий вид без подстановок'}</p>
       <div class="chips">${Object.entries(STAGE).map(([k,v])=>`<button class="chip ${k===stage?'on':''}" data-st="${k}">${v}</button>`).join('')}</div>
+      ${variants}
+      ${sc&&list.length<2?`<p class="dmhead" style="margin:2px 0 6px">${esc(sc.title)}</p>`:''}
       <div class="txt">${sc ? fmt(sc.body, lead) : '<p style="color:var(--dim)">Для этого этапа скрипта пока нет. Админ добавит во вкладке «Команда».</p>'}</div>
       ${objections.length?h3('Возражения')+objections.map(o=>`<div class="obj ${S.callScript?.objection_id===o.id?'open':''}" data-obj="${o.id}"><button type="button">${esc(o.title)}</button>
         <div class="ans txt">${fmt(o.body, lead)}</div></div>`).join(''):''}
@@ -1549,7 +1682,8 @@ function scriptSheet(lead, initialStage){
           <button type="button" class="chip" data-copy="${m.id}">Скопировать</button></div></div></div>`).join(''):''}
       <button class="btn ghost" id="sc_close">Закрыть</button>
     </div>`;
-    d.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>{ stage=b.dataset.st; draw(); });
+    d.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>{ stage=b.dataset.st; pickId=null; draw(); });
+    d.querySelectorAll('[data-var]').forEach(b=>b.onclick=()=>{ pickId=b.dataset.var; draw(); });
     d.querySelectorAll('.obj > button').forEach(b=>b.onclick=()=>{
       const o=b.parentElement; const open=!o.classList.contains('open');
       d.querySelectorAll('.obj').forEach(x=>x.classList.remove('open'));
@@ -1562,6 +1696,8 @@ function scriptSheet(lead, initialStage){
       catch{ toast('Не удалось скопировать: выдели текст пальцем', true); }
     });
     d.querySelector('#sc_close').onclick=()=>d.remove();
+    // Выбранный этап может стоять за краем ленты чипов — подкручиваем к нему
+    requestAnimationFrame(()=>d.querySelectorAll('.chips .chip.on').forEach(c=>{ const w=c.parentElement; w.scrollLeft=c.offsetLeft-w.offsetLeft-16; }));
   };
   draw();
   d.onclick=e=>{ if(e.target===d) d.remove(); };
@@ -1602,12 +1738,6 @@ function learnScreen(){
     <span>${esc(x.title)}<span class="cnt" style="margin-left:8px">${label}${!x.active?' · выключен':''}</span></span></button>`;
   const scripts=S.scripts.filter(x=>x.kind==='script'), objs=S.scripts.filter(x=>x.kind==='objection'),
         msgs=S.scripts.filter(x=>x.kind==='message');
-  // Справочник сегментов правится здесь же: выключенный остаётся у старых лидов, новым не предлагается
-  const segs = adm ? `<div class="card"><h3>Сегменты</h3>
-    <div class="chips" style="flex-wrap:wrap">${S.segments.map(s=>`<button class="chip" data-seg="${esc(s.name)}" style="${s.active?'':'opacity:.4;text-decoration:line-through'}">${esc(s.name)}</button>`).join('')}</div>
-    <div class="two"><input id="seg_new" type="text" placeholder="Новый сегмент"><button class="btn ghost" id="seg_add" style="margin-top:0">Добавить</button></div>
-    <p class="note">Нажатие выключает или включает сегмент. Скрипт с сегментом показывается только лидам этого сегмента.</p>
-  </div>` : '';
   // Этап подписываем, только если название скрипта не повторяет его слово в слово
   const byStage=Object.keys(STAGE).flatMap(st=>scripts.filter(x=>x.stage===st).map(x=>item(x,
     [x.title.toLowerCase()===STAGE[st].toLowerCase()?'':STAGE[st], x.segment].filter(Boolean).join(' · '))));
@@ -1624,7 +1754,7 @@ function learnScreen(){
     <div class="card"><h3>Сообщения в WhatsApp</h3>${msgs.map(x=>item(x,'')).join('')||'<p class="note" style="margin:0">Пока нет</p>'}
       <p class="note">Открываются из карточки лида по кнопке «Скрипт» уже с подставленным названием и именем.</p>
       ${adm?`<button class="btn ghost" data-new-script="message">Добавить сообщение</button>`:''}</div>
-    ${segs}
+    ${adm?`<button class="btn ghost" data-nav="settings" style="margin:0 0 12px">Сегменты и воронка — в «Настройках»</button>`:''}
     <div class="card"><h3>Уроки · пройдено ${[...done].filter(id=>S.lessons.some(l=>l.id===id)).length} из ${S.lessons.filter(l=>l.active).length}</h3>${lessons||'<p class="note" style="margin:0">Пока нет</p>'}
       ${adm?`<button class="btn ghost" data-new-lesson>Добавить урок</button>`:''}</div>
   </div>`;
@@ -1632,7 +1762,9 @@ function learnScreen(){
 
 // Редактор скрипта или возражения. Только админ.
 function scriptEditor(x, newKind){
-  const isNew=!x; x=x||{kind:newKind||'script',stage:'first_call',active:true,sort_order:10,title:'',body:'',segment:''};
+  // Новый встаёт в конец своего списка, а не на одно место с первым
+  const last=Math.max(0,...S.scripts.filter(y=>y.kind===(newKind||'script')).map(y=>y.sort_order||0));
+  const isNew=!x; x=x||{kind:newKind||'script',stage:'first_call',active:true,sort_order:last+10,title:'',body:'',segment:''};
   const d=document.createElement('div'); d.className='sheet';
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 6px;font-size:19px">${isNew?'Новый':'Изменить'}</h2>
@@ -1701,7 +1833,9 @@ function lessonScreen(){
     ${qs.map((q,i)=>`<div class="q" data-q="${i}"><div class="qt">${i+1}. ${esc(q.q)}</div>
       ${(q.options||[]).map((o,j)=>`<label class="opt"><input type="radio" name="q${i}" value="${j}"> ${esc(o)}</label>`).join('')}
       <div class="hint" hidden></div></div>`).join('')}
-    <button class="btn" id="ls_check">Проверить</button>`:''}
+    <button class="btn" id="ls_check">Проверить</button>`
+    // Урок без вопросов раньше нельзя было пройти, и «Урок дня» застревал на нём навсегда
+    : passed ? '' : `<button class="btn" id="ls_read">Прочитал</button>`}
     ${isAdmin()?`<button class="btn ghost" id="ls_edit">Изменить урок</button>`:''}
   </div>`;
 }
@@ -1767,6 +1901,13 @@ function lessonEditor(l){
     try{ await db(`lessons?id=eq.${l.id}`,{method:'DELETE',prefer:'return=minimal'});
       d.remove(); toast('Удалено'); S.lesson=null; go('learn'); }catch(e){ toast(e.message,true); }
   };
+}
+
+async function passLesson(score, total){
+  await db('lesson_progress?on_conflict=profile_id,lesson_id',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',
+    body:JSON.stringify({profile_id:S.prof.id, lesson_id:S.lesson.id, score, total, passed_at:new Date().toISOString()})});
+  if(!S.progress.some(x=>x.lesson_id===S.lesson.id)) S.progress.push({profile_id:S.prof.id, lesson_id:S.lesson.id});
+  toast('Урок пройден');
 }
 
 /* ── ЗАМЕЧАНИЯ НАСТАВНИКА ── */
@@ -1849,6 +1990,7 @@ function teamScreen(){
     Если аккаунт уже заведён в Supabase, доступ выдаётся сразу.</p>
   </div>`;
   const links=`<div class="card">
+    <button class="link" data-nav="settings"><span>Настройки<span class="cnt" style="margin-left:8px">воронка, отказы, тарифы, форма касания</span></span></button>
     <button class="link" data-nav="norms">Нормы плана и разгон</button>
     <button class="link" data-nav="learn"><span>Скрипты, возражения, уроки<span class="cnt" style="margin-left:8px">${S.scripts.length+S.lessons.length||''}</span></span></button>
     <button class="link" data-nav="report">Отчёт</button>
@@ -1945,12 +2087,214 @@ function normsScreen(){
   </div>`;
 }
 
+/* ── НАСТРОЙКИ (только админ) ──
+   Всё, что раньше было зашито в код: этапы воронки, причины отказа, тарифы,
+   сегменты и форма касания. Правится с телефона, выкладка файла не нужна. */
+function settingsScreen(){
+  const head=`<div class="topbar"><button class="back" data-back>‹</button>
+    <h1>Настройки<span class="sub">воронка, отказы, тарифы, форма касания</span></h1></div>`;
+  if(S.busy) return head+`<div class="spin"></div>`;
+  const warn = S.dictsLive ? '' : `<div class="notice"><span><b>Нужна миграция.</b> Выполни
+    <span style="font-family:var(--mono)">db/18_settings.sql</span> в Supabase: пока её нет,
+    этапы, причины отказа и форма касания показаны по умолчанию и не сохраняются.</span></div>`;
+  const arrows=(kind,code,i,n)=>`<span class="ord">
+      <button class="obtn" data-mv="${kind}:${esc(code)}:-1" ${i===0?'disabled':''} aria-label="Выше">↑</button>
+      <button class="obtn" data-mv="${kind}:${esc(code)}:1" ${i===n-1?'disabled':''} aria-label="Ниже">↓</button></span>`;
+  const drow=(kind,x,i,n,meta)=>`<div class="drow ${x.active===false?'off':''}">
+      <button class="dmain" data-dict="${kind}:${esc(x.code)}"><b>${esc(x.title)}</b>
+        <span>${meta.filter(Boolean).map(esc).join(' · ')}</span></button>
+      ${arrows(kind,x.code,i,n)}</div>`;
+
+  const stages=S.stages.map((s,i)=>drow('stage',s,i,S.stages.length,[
+    s.active?'':'выключен', FIXED_ST.includes(s.code)?'нужен базе':s.system?'':'свой',
+    s.in_pipeline?'в MRR':'', s.script_stage?'скрипт: '+STAGE[s.script_stage]:''])).join('');
+  const reasons=S.lostReasons.map((r,i)=>drow('lost',r,i,S.lostReasons.length,[
+    r.active?'':'выключена', r.code==='unreachable'?'ставит база после 5 недозвонов':r.system?'':'своя'])).join('');
+  const tariffs=S.tariffs.map((t,i)=>drow('tariff',t,i,S.tariffs.length,[
+    t.active===false?'выключен':'', `${money(t.setup_amount)} + ${money(t.mrr_amount)}/мес`])).join('');
+
+  const cfg=S.touchCfg;
+  const blocks=cfg.blocks.map((b,i)=>`<div class="drow ${b.on?'':'off'}">
+      <label class="check" style="flex:0 0 auto;padding:0 4px 0 0;margin:0"><input type="checkbox" data-tb-on="${b.id}" ${b.on?'checked':''} aria-label="Показывать"></label>
+      <input type="text" class="tbt" data-tb-title="${b.id}" value="${esc(b.title)}" placeholder="${esc(TOUCH_BLOCKS[b.id])}">
+      ${arrows('block',b.id,i,cfg.blocks.length)}</div>`).join('');
+
+  return head+`<div class="wrap">${warn}
+    <div class="card"><h3>Форма касания</h3>
+      <p class="note" style="margin:0 0 8px">Галочка — блок виден менеджеру. Подпись можно заменить своей,
+      пустая — стандартная. Выключенный блок берёт значение по умолчанию: исход «Ответил», шаг через день по умолчанию.</p>
+      ${blocks}
+      <label for="tf_days">Чипы даты следующего шага, дней через запятую</label>
+      <input id="tf_days" type="text" inputmode="numeric" value="${cfg.days.join(', ')}" style="font-family:var(--mono)">
+      <label for="tf_day">Выбрано по умолчанию</label>
+      <select id="tf_day">${cfg.days.map(n=>`<option value="${n}" ${n===cfg.day?'selected':''}>${dayLabel(n)}</option>`).join('')}</select>
+      <div class="two"><button class="btn ghost" id="tf_reset">По умолчанию</button><button class="btn" id="tf_save">Сохранить форму</button></div>
+    </div>
+    <div class="card"><h3>Этапы воронки</h3>${stages}
+      <button class="btn ghost" data-dict-new="stage">Добавить этап</button>
+      <p class="note">Нажми на этап, чтобы переименовать, выключить или выбрать скрипт.
+      «В MRR» — лиды на этапе считаются в сумме «В работе». Свой этап, как любой открытый, требует дату следующего шага.</p></div>
+    <div class="card"><h3>Причины отказа</h3>${reasons}
+      <button class="btn ghost" data-dict-new="lost">Добавить причину</button></div>
+    <div class="card"><h3>Тарифы</h3>${tariffs}
+      <button class="btn ghost" data-dict-new="tariff">Добавить тариф</button>
+      <p class="note">Суммы в сделках считает база из тарифа, менеджер их не меняет. Новая цена
+      пересчитает сделку на этом тарифе при следующей записи по ней. Чтобы не трогать старые сделки,
+      заведи новый тариф, а старый выключи.</p></div>
+    <div class="card"><h3>Сегменты</h3>
+      <div class="chips" style="flex-wrap:wrap">${S.segments.map(s=>`<button class="chip" data-seg="${esc(s.name)}" style="${s.active?'':'opacity:.4;text-decoration:line-through'}">${esc(s.name)}</button>`).join('')}</div>
+      <div class="two"><input id="seg_new" type="text" placeholder="Новый сегмент"><button class="btn ghost" id="seg_add" style="margin-top:0">Добавить</button></div>
+      <p class="note">Нажатие выключает или включает сегмент. Скрипт с сегментом показывается только лидам этого сегмента.</p></div>
+    <div class="card">
+      <button class="link" data-nav="learn">Скрипты, возражения, уроки</button>
+      <button class="link" data-nav="norms">Нормы плана и разгон</button>
+      <button class="link" data-nav="imp">Загрузить лиды из таблицы</button>
+      <button class="link" id="exp">Выгрузить всё в Excel</button>
+    </div>
+  </div>`;
+}
+
+const DICT = {
+  stage:  { table:'stages',       key:'code', list:()=>S.stages,      name:'этап' },
+  lost:   { table:'lost_reasons', key:'code', list:()=>S.lostReasons, name:'причину' },
+  tariff: { table:'tariffs',      key:'code', list:()=>S.tariffs,     name:'тариф' },
+};
+// Понятный текст вместо «violates foreign key constraint»
+function dictErr(e){
+  const m=e.message||'';
+  if(/foreign key|violates/i.test(m)) return 'Значение используется в лидах. Выключи его вместо удаления';
+  if(/duplicate/i.test(m)) return 'Такой код уже есть';
+  return m;
+}
+async function reloadSettings(){ await go('settings', false); }
+
+// Перестановка соседей: меняем местами sort_order двух строк
+async function moveDict(kind, code, dir){
+  if(kind==='block'){
+    readTouchForm(); // до поиска: readTouchForm собирает новый массив блоков
+    const b=S.touchCfg.blocks, i=b.findIndex(x=>x.id===code), j=i+dir;
+    if(j<0||j>=b.length) return;
+    [b[i],b[j]]=[b[j],b[i]]; return render();
+  }
+  const D=DICT[kind], list=D.list(), i=list.findIndex(x=>x.code===code), j=i+dir;
+  if(j<0||j>=list.length) return;
+  // Одинаковые порядковые номера разводим заново, иначе обмен ничего не даст
+  const ord=list.map((x,k)=>(k+1)*10); [ord[i],ord[j]]=[ord[j],ord[i]];
+  try{
+    await Promise.all(list.map((x,k)=>x.sort_order===ord[k] ? null :
+      db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({sort_order:ord[k]})})));
+    await reloadSettings();
+  }catch(e){ toast(dictErr(e),true); }
+}
+
+// Лист правки этапа, причины или тарифа
+function dictSheet(kind, x){
+  const D=DICT[kind], isNew=!x;
+  x = x || { title:'', active:true, system:false, in_pipeline:false, script_stage:null, setup_amount:'', mrr_amount:'' };
+  const fixed = kind==='stage' && FIXED_ST.includes(x.code);
+  const extra = kind==='stage' ? `
+      <label for="ds_script">Какой скрипт открывать на этапе</label>
+      <select id="ds_script"><option value="">Первый звонок (по умолчанию)</option>${Object.entries(STAGE).map(([k,v])=>
+        `<option value="${k}" ${x.script_stage===k?'selected':''}>${v}</option>`).join('')}</select>
+      ${['new','won','lost'].includes(x.code)?'':`<label class="check"><input type="checkbox" id="ds_pipe" ${x.in_pipeline?'checked':''}> Считать в «MRR в работе»</label>`}`
+    : kind==='tariff' ? `
+      <div class="two"><div><label for="ds_setup">Внедрение, ₽</label><input id="ds_setup" type="number" inputmode="numeric" value="${x.setup_amount??''}"></div>
+        <div><label for="ds_mrr">Подписка, ₽/мес</label><input id="ds_mrr" type="number" inputmode="numeric" value="${x.mrr_amount??''}"></div></div>` : '';
+  const d=document.createElement('div'); d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 6px;font-size:19px">${isNew?'Добавить '+D.name:esc(x.title)}</h2>
+    <label for="ds_title">Название</label>
+    <input id="ds_title" type="text" value="${esc(x.title)}">
+    ${extra}
+    <label class="check"><input type="checkbox" id="ds_active" ${x.active!==false?'checked':''} ${fixed?'disabled':''}>
+      ${fixed?'Нужен базе, всегда включён':'Включён: предлагается в выборе'}</label>
+    ${!isNew&&x.system?`<p class="note">Стандартное значение: переименовать можно, удалить нельзя${kind==='stage'&&['brief_done','proposal_sent'].includes(x.code)?'. На нём считается план':''}.</p>`:''}
+    <div class="sfoot"><button class="btn ghost" id="ds_cancel">Отмена</button><button class="btn" id="ds_save">Сохранить</button></div>
+    ${!isNew&&!x.system?`<button class="btn warn" id="ds_del">Удалить</button>`:''}
+  </div>`;
+  document.body.appendChild(d);
+  const $=id=>d.querySelector('#'+id);
+  $('ds_cancel').onclick=()=>d.remove();
+  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  $('ds_save').onclick=async()=>{
+    const body={ title:$('ds_title').value.trim(), active:$('ds_active').checked };
+    if(!body.title) return toast('Впиши название',true);
+    if(kind==='stage'){ body.script_stage=$('ds_script').value||null; if($('ds_pipe')) body.in_pipeline=$('ds_pipe').checked; }
+    if(kind==='tariff'){
+      body.setup_amount=+$('ds_setup').value; body.mrr_amount=+$('ds_mrr').value;
+      if(!($('ds_setup').value && $('ds_mrr').value) || body.setup_amount<0 || body.mrr_amount<0) return toast('Впиши обе суммы',true);
+    }
+    if(fixed) delete body.active;
+    try{
+      if(isNew){
+        // Код — служебный: латиница, по нему лид ссылается на справочник
+        body.code=(kind==='tariff'?'t':kind==='stage'?'s':'r')+'_'+Date.now().toString(36);
+        body.sort_order=Math.max(0,...D.list().map(y=>y.sort_order||0))+10;
+        await db(D.table,{method:'POST',prefer:'return=minimal',body:JSON.stringify(body)});
+      } else await db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
+      d.remove(); toast('Сохранено'); await reloadSettings();
+    }catch(e){ toast(dictErr(e),true); }
+  };
+  const del=$('ds_del');
+  if(del) del.onclick=async()=>{
+    if(!confirm(`Удалить «${x.title}»?`)) return;
+    try{ await db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,{method:'DELETE',prefer:'return=minimal'});
+      d.remove(); toast('Удалено'); await reloadSettings();
+    }catch(e){ toast(dictErr(e),true); }
+  };
+}
+
+// Несохранённые правки формы касания переносим в состояние перед перерисовкой
+function readTouchForm(){
+  S.touchCfg.blocks.forEach(b=>{
+    const on=document.querySelector(`[data-tb-on="${b.id}"]`), t=document.querySelector(`[data-tb-title="${b.id}"]`);
+    if(on) b.on=on.checked; if(t) b.title=t.value.trim();
+  });
+  const days=document.getElementById('tf_days');
+  if(days){
+    const list=days.value.split(/[^0-9]+/).filter(Boolean).map(Number);
+    S.touchCfg=touchCfg({blocks:S.touchCfg.blocks, days:list, day:+document.getElementById('tf_day').value});
+  }
+}
+async function saveTouchForm(cfg){
+  await db('app_settings?on_conflict=key',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',
+    body:JSON.stringify({key:'touch_form', value:cfg})});
+  S.touchCfg=touchCfg(cfg); saveBoot();
+}
+
+// Массовое назначение ответственного из списка
+function assignSheet(){
+  const ids=[...S.pick];
+  const d=document.createElement('div'); d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 6px;font-size:19px">Ответственный</h2>
+    <p class="note" style="margin:0 0 4px">Выбрано: ${ids.length} ${plural(ids.length,'лид','лида','лидов')}</p>
+    <label for="as_sel">Кому</label>
+    <select id="as_sel"><option value="">Ничей — вернуть в общий пул</option>
+      ${S.staff.filter(u=>u.active).map(u=>`<option value="${u.id}">${esc(u.name)}${u.role==='admin'?' (админ)':''}</option>`).join('')}</select>
+    <div class="sfoot"><button class="btn ghost" id="as_cancel">Отмена</button><button class="btn" id="as_save">Назначить</button></div>
+  </div>`;
+  document.body.appendChild(d);
+  d.querySelector('#as_cancel').onclick=()=>d.remove();
+  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  d.querySelector('#as_save').onclick=async()=>{
+    const v=d.querySelector('#as_sel').value||null, b=d.querySelector('#as_save'); b.disabled=true;
+    try{
+      // Пачками по 50: адрес с сотней идентификаторов может не пройти через прокси
+      for(let i=0;i<ids.length;i+=50)
+        await db(`leads?id=in.(${ids.slice(i,i+50).join(',')})`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({owner_id:v})});
+      d.remove(); S.pick=null; toast(v?`Назначено: ${ids.length}`:`Сняты с ответственного: ${ids.length}`); go('list');
+    }catch(e){ toast(e.message,true); b.disabled=false; }
+  };
+}
+
 /* ── ЕЩЁ ── */
 function moreScreen(){
   return `<div class="topbar"><h1>Ещё<span class="sub">${esc(S.prof.name)} · ${
     isAdmin()?'администратор':'менеджер'}</span></h1></div>
   <div class="wrap">
     <button class="btn ghost" data-nav="report">Отчёт</button>
+    ${isAdmin()?`<button class="btn ghost" data-nav="settings">Настройки</button>`:''}
     ${isAdmin()?`<button class="btn ghost" id="exp">Выгрузить всё в Excel</button>`:''}
     <button class="btn ghost" id="reload">Обновить данные</button>
     <button class="btn warn" id="out">Выйти</button>
@@ -1970,42 +2314,71 @@ async function showVersion(){
   }catch{}
 }
 
+// Всё из таблицы, страницами: Supabase отдаёт не больше 1000 строк за запрос,
+// и без этого выгрузка на большой базе молча обрезалась бы.
+async function dbAll(path){
+  const out=[], n=1000;
+  for(let off=0;;off+=n){
+    const part=await db(`${path}${path.includes('?')?'&':'?'}limit=${n}&offset=${off}`);
+    out.push(...part); if(part.length<n) return out;
+  }
+}
+function csvOf(head, rows){
+  const q=v=>{ if(v==null) return ''; if(typeof v==='boolean') v=v?'да':'нет';
+    const s=String(v).replace(/"/g,'""'); return /[";\n\r]/.test(s)?`"${s}"`:s; };
+  return '﻿'+[head.join(';'), ...rows.map(r=>r.map(q).join(';'))].join('\r\n');
+}
+const dtTxt = v => v ? new Date(v).toLocaleString('ru-RU') : '';
+
+// Бэкап: лиды, журнал касаний и контакты — три файла. Раньше уходили только лиды,
+// а журнал, ради которого CRM и ведётся, в резервную копию не попадал.
 async function exportAll(){
-  toast('Готовлю файл…');
+  toast('Готовлю файлы…');
   try{
-    const rows=await db('v_leads?select=*&order=company_name');
+    const [leads, acts, cts] = await Promise.all([
+      dbAll('v_leads?select=*&order=company_name'),
+      dbAll('activities?select=*&order=created_at'),
+      dbAll('contacts?select=*,companies(name)&order=created_at') ]);
+    const name=new Map(leads.map(l=>[l.id,l.company_name]));
+    const who=Object.fromEntries(S.staff.map(u=>[u.id,u.name]));
     const cols=['company_name','segment','kind','owner_name','primary_phone',
       'dm_name','dm_position','dm_phone','status','tariff',
       'setup_amount','mrr_amount','next_action_at','next_action','lost_reason','score',
       'touch_count','last_touch_at','address','instagram_url','gis_url','site_url',
       'outlets_count','avg_check','has_online_order','has_own_app','note','todo'];
-    const head=['Компания','Сегмент','Тип','Ответственный','Телефон',
+    const f1=csvOf(['Компания','Сегмент','Тип','Ответственный','Телефон',
       'ЛПР','Должность ЛПР','Телефон ЛПР','Статус','Тариф','Внедрение','MRR',
       'След. шаг дата','След. шаг','Причина отказа','Приоритет','Касаний','Последнее касание',
       'Адрес','Instagram','2ГИС','Сайт','Точек','Средний чек','Онлайн-заказ','Своё приложение',
-      'Заметка','Дособрать'];
-    const q=v=>{ if(v==null) return ''; const s=String(v).replace(/"/g,'""');
-      return /[";\n]/.test(s)?`"${s}"`:s; };
-    const csv=[head.join(';'), ...rows.map(r=>cols.map(c=>{
-      let v=r[c];
-      if(c==='status') v=STATUS[v]; if(c==='lost_reason') v=v?LOST[v]:'';
-      if(c==='kind') v = v==='channel'?'Канал':'Лид';
-      if(typeof v==='boolean') v=v?'да':'нет';
-      return q(v);
-    }).join(';'))].join('\r\n');
-    const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
-    const name=`balance-crm-${iso(new Date())}.csv`;
-    // На телефоне отдаём через «Поделиться», как отчёт: скрытая ссылка в приложении
+      'Заметка','Дособрать'], leads.map(r=>cols.map(c=>{
+        let v=r[c];
+        if(c==='status') v=STATUS[v]||v; if(c==='lost_reason') v=v?(LOST[v]||v):'';
+        if(c==='kind') v = v==='channel'?'Канал':'Лид';
+        return v; })));
+    const f2=csvOf(['Когда','Компания','Автор','Канал','Исход','Говорил с','Демо','Этап было','Этап стало','Комментарий'],
+      acts.map(a=>[dtTxt(a.created_at), name.get(a.lead_id)||a.lead_id, who[a.author_id]||'',
+        CHAN[a.channel]||a.channel, OUT[a.outcome]||a.outcome||'', LEVEL[a.spoke_with]||'',
+        DEMO[a.demo]||'', a.status_from?STATUS[a.status_from]||a.status_from:'',
+        a.status_to?STATUS[a.status_to]||a.status_to:'', a.comment]));
+    const f3=csvOf(['Компания','Имя','Должность','Телефон','ЛПР','Основной номер'],
+      cts.map(c=>[c.companies?.name||'', c.name, c.position, c.phone_e164||c.phone_raw,
+        c.is_decision_maker, c.is_primary]));
+    const day=iso(new Date());
+    const files=[[`balance-leads-${day}.csv`,f1],[`balance-journal-${day}.csv`,f2],[`balance-contacts-${day}.csv`,f3]]
+      .map(([n,t])=>new File([t], n, {type:'text/csv'}));
+    // На телефоне отдаём через «Поделиться»: скрытая ссылка в приложении
     // с домашнего экрана может ничего не скачать. На компьютере обычное скачивание.
-    const file=new File([blob], name, {type:'text/csv'});
-    if(navigator.canShare?.({files:[file]})){
-      await navigator.share({files:[file], title:'Выгрузка Balance CRM'});
+    if(navigator.canShare?.({files})){
+      await navigator.share({files, title:'Выгрузка Balance CRM'});
     }else{
-      const a=document.createElement('a');
-      a.href=URL.createObjectURL(blob); a.download=name; a.click();
-      setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      for(const f of files){
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(f); a.download=f.name; a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+        await new Promise(r=>setTimeout(r,400));
+      }
     }
-    toast(`Выгружено ${rows.length} записей`);
+    toast(`Выгружено: лидов ${leads.length}, касаний ${acts.length}, контактов ${cts.length}`);
     LS.set('exp-'+monthKey().slice(0,7), true);
   }catch(e){ if(e.name!=='AbortError') toast(e.message,true); }
 }
@@ -2259,7 +2632,9 @@ async function loadReport(){
   const conv=[
     ['Касались',        uniq(touches, ()=>true)],
     ['Говорили с ЛПР',  uniq(touches, a=>a.with_dm)],
-    ['Получили демо',   uniq(touches, a=>a.demo)],
+    // Демо считаем и по отметке в касании, и по переходу на этап «Демо получил»:
+    // блок «Отправил демо» в форме касания админ может выключить
+    ['Получили демо',   new Set([...touches.filter(a=>a.demo), ...sys.filter(a=>a.status_to==='brief_done')].map(a=>a.lead_id)).size],
     ['Услышали цену',   uniq(sys, a=>a.status_to==='proposal_sent')],
     ['Купили',          uniq(sys, a=>a.status_to==='won')],
   ];
@@ -2303,7 +2678,7 @@ async function loadReport(){
     setupSum:won.reduce((s,l)=>s+(l.setup_amount||0),0),
     mrrSum:won.reduce((s,l)=>s+(l.mrr_amount||0),0),
     dmTouch, dmLeads, lostBy, cash, cashTotal, planLine, conv, demos,
-    pipeline:leads.filter(l=>leadMine(l)&&['proposal_sent','negotiation'].includes(l.status))
+    pipeline:leads.filter(l=>leadMine(l)&&stageOf(l.status)?.in_pipeline)
                   .reduce((s,l)=>s+(l.mrr_amount||0),0)
   };
 }
@@ -2689,7 +3064,7 @@ function navBar(){
   // Четвёртая вкладка зависит от роли: менеджеру учёба, админу команда
   // Замечания наставника живут на «Сегодня», поэтому бейдж на «Учёбе» только путал
   const four = isAdmin() ? n('team','⚇','Команда') : n('learn','▤','Учёба');
-  const on = ['person','norms'].includes(S.view) ? 'team' : S.view==='lesson' ? 'learn' : S.view;
+  const on = ['person','norms','settings'].includes(S.view) ? 'team' : S.view==='lesson' ? 'learn' : S.view;
   return `<nav class="nav">
     ${n('today','◉','Сегодня',over)}
     ${n('list','☰','Лиды')}
@@ -2855,6 +3230,11 @@ function bind(){
     S.lesson=S.lessons.find(l=>l.id===b.dataset.lesson); if(S.lesson) go('lesson'); });
   const nl=document.querySelector('[data-new-lesson]'); if(nl) nl.onclick=()=>lessonEditor(null);
   const le=document.getElementById('ls_edit'); if(le) le.onclick=()=>lessonEditor(S.lesson);
+  const lr=document.getElementById('ls_read');
+  if(lr) lr.onclick=async()=>{
+    lr.disabled=true;
+    try{ await passLesson(0,0); render(); }catch(e){ toast(e.message,true); lr.disabled=false; }
+  };
   const lc=document.getElementById('ls_check');
   if(lc) lc.onclick=async()=>{
     const qs=S.lesson.questions||[]; let ok=0;
@@ -2868,12 +3248,7 @@ function bind(){
       hint.textContent = right ? 'Верно' : `Правильно: ${q.options[q.correct]}.${q.hint?' '+q.hint:''}`;
     });
     if(ok===qs.length){
-      try{
-        await db('lesson_progress?on_conflict=profile_id,lesson_id',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',
-          body:JSON.stringify({profile_id:S.prof.id, lesson_id:S.lesson.id, score:ok, total:qs.length, passed_at:new Date().toISOString()})});
-        if(!S.progress.some(x=>x.lesson_id===S.lesson.id)) S.progress.push({profile_id:S.prof.id, lesson_id:S.lesson.id});
-        toast('Урок пройден');
-      }catch(e){ toast(e.message,true); }
+      try{ await passLesson(ok, qs.length); }catch(e){ toast(e.message,true); }
     } else toast(`${ok} из ${qs.length}. Прочитай подсказки и попробуй ещё`, true);
     lc.scrollIntoView({block:'end'});
   };
@@ -2891,6 +3266,9 @@ function bind(){
     document.querySelectorAll('#nd_calls_day,#nd_talks_day,#nd_dm_talks_day,#nd_briefs_week,#nd_proposals_week,[data-week]').forEach(i=>i.oninput=preview);
     preview();
     document.getElementById('rs_add').onclick=()=>{
+      // Вписанное, но не сохранённое переносим в состояние: иначе перерисовка его сотрёт
+      K.forEach(k=>{ const v=document.getElementById('nd_'+k).value.trim(); if(v!=='') S.defaults[k]=+v; });
+      document.querySelectorAll('[data-week]').forEach(i=>{ const r=S.ramp.find(x=>x.week===+i.dataset.week); if(r) r.pct=+i.value||0; });
       const w=(S.ramp.at(-1)?.week||0)+1; S.ramp.push({week:w,pct:100}); render(); };
     nds.onclick=async()=>{
       const body={updated_by:S.prof.id};
@@ -2939,7 +3317,36 @@ function bind(){
   };
 
   const q=document.getElementById('q');
-  if(q){ let t; q.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{ S.q=q.value.trim(); go('list'); },420); }; }
+  if(q){ let t; q.oninput=()=>{ S.qFocus=true; clearTimeout(t); t=setTimeout(()=>{ S.q=q.value.trim(); go('list'); },420); }; }
+
+  // Режим выбора в списке
+  const pkOn=document.getElementById('pk_on'); if(pkOn) pkOn.onclick=()=>{ S.pick=new Set(); render(); };
+  const pkOff=document.getElementById('pk_off'); if(pkOff) pkOff.onclick=()=>{ S.pick=null; render(); };
+  const pkAll=document.getElementById('pk_all');
+  if(pkAll) pkAll.onclick=()=>{ const all=S.data.every(l=>S.pick.has(l.id));
+    S.data.forEach(l=>all?S.pick.delete(l.id):S.pick.add(l.id)); render(); };
+  document.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{
+    const id=b.dataset.pick; S.pick.has(id)?S.pick.delete(id):S.pick.add(id); render(); });
+  const pkGo=document.getElementById('pk_go'); if(pkGo) pkGo.onclick=assignSheet;
+
+  // Настройки
+  document.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>{
+    const [k,c,dir]=b.dataset.mv.split(':'); moveDict(k,c,+dir); });
+  document.querySelectorAll('[data-dict]').forEach(b=>b.onclick=()=>{
+    const [k,c]=b.dataset.dict.split(':'); dictSheet(k, DICT[k].list().find(x=>x.code===c)); });
+  document.querySelectorAll('[data-dict-new]').forEach(b=>b.onclick=()=>dictSheet(b.dataset.dictNew, null));
+  document.querySelectorAll('[data-tb-on]').forEach(i=>i.onchange=()=>i.closest('.drow').classList.toggle('off',!i.checked));
+  const tfSave=document.getElementById('tf_save');
+  if(tfSave) tfSave.onclick=async()=>{
+    readTouchForm(); tfSave.disabled=true;
+    try{ await saveTouchForm(S.touchCfg); toast('Форма касания сохранена'); render(); }
+    catch(e){ toast(e.message,true); tfSave.disabled=false; }
+  };
+  const tfReset=document.getElementById('tf_reset');
+  if(tfReset) tfReset.onclick=async()=>{
+    if(!confirm('Вернуть форму касания к стандартной?')) return;
+    try{ await saveTouchForm(TOUCH_DEF); toast('Форма по умолчанию'); render(); }catch(e){ toast(e.message,true); }
+  };
 
   const touch=document.querySelector('[data-touch]'); if(touch) touch.onclick=touchSheet;
   const lnote=document.querySelector('[data-note-lead]'); if(lnote) lnote.onclick=leadNoteSheet;
