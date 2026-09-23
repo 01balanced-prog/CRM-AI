@@ -329,11 +329,32 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .ord{display:flex;gap:4px;flex:0 0 auto}
 .obtn{width:44px;height:44px;border-radius:10px;background:var(--raised);border:1px solid var(--line);color:var(--muted);font-size:17px}
 .obtn[disabled]{opacity:.25}
+/* Сортировка перетаскиванием */
+.drag{flex:0 0 40px;height:48px;display:grid;place-items:center;color:var(--dim);font-size:22px;touch-action:none;cursor:grab;user-select:none}
+.drow.dragging{position:relative;z-index:5;background:var(--raised);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.6)}
+.dcol{flex:1;min-width:0;padding:6px 0}
+.dti{min-height:40px!important;padding:7px 10px!important;font-size:15px!important;font-weight:600;background:transparent!important;border-color:transparent!important}
+.dti:focus{background:var(--raised)!important;border-color:var(--line)!important}
+.dmeta{display:block;font-size:12px;color:var(--muted);padding:0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drow.off .dti{color:var(--dim)}
 /* Кнопки листа прижаты к низу: «Сохранить» не уезжает под сгиб длинной формы */
 .sfoot{position:sticky;bottom:calc(-22px - env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 2fr;gap:8px;
   margin:14px -16px 0;padding:10px 16px calc(12px + env(safe-area-inset-bottom));
   background:var(--surface);border-top:1px solid var(--line);z-index:2}
 .sfoot .btn{margin:0}
+/* Список, пока идёт ответ на новый поиск */
+.stale{opacity:.45;transition:opacity .15s}
+/* Сообщение не закрывает главную кнопку: над закреплённой панелью, а при открытом листе — сверху */
+#app.docked ~ .toast{bottom:calc(150px + env(safe-area-inset-bottom))}
+body.sheeted .toast{bottom:auto!important;top:calc(12px + env(safe-area-inset-top))}
+.toast .tb.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+/* Потянуть вниз, чтобы обновить */
+.ptr{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top));z-index:40;width:36px;height:36px;margin-left:-18px;
+  border-radius:50%;background:var(--raised);border:1px solid var(--line);display:grid;place-items:center;
+  color:var(--muted);font-size:18px;opacity:0;transform:translateY(-50px);pointer-events:none}
+.ptr.go{color:var(--accent)}
+.ptr.run{opacity:1;transform:translateY(40px)}
+.ptr.run i{animation:sp .7s linear infinite}
 /* Режим выбора в списке */
 .row.picked{border-color:var(--accent)}
 .tickbox{flex:0 0 62px;display:grid;place-items:center;border-left:1px solid var(--line);
@@ -576,7 +597,7 @@ async function flushQueue(){
         toast(`Касание не принято: ${e.message}`, true); }
     }
   } finally { flushing=false; }
-  if(sent){ toast(`Связь есть: отправлено касаний — ${sent}`); if(S.view==='today') go('today'); }
+  if(sent){ toast(`Связь есть: отправлено касаний — ${sent}`); if(S.view==='today') refreshView(); }
 }
 window.addEventListener('online', flushQueue);
 
@@ -655,7 +676,7 @@ function toast(msg, err, action){
   const el=document.createElement('div');
   el.className='toast'+(err?' err':''); el.textContent=msg;
   if(action){
-    const b=document.createElement('button'); b.className='tb'; b.textContent=action.label;
+    const b=document.createElement('button'); b.className='tb'+(action.ghost?' ghost':''); b.textContent=action.label;
     b.onclick=()=>{ el.remove(); action.fn(); }; el.appendChild(b);
   }
   document.body.appendChild(el); setTimeout(()=>el.remove(), action?7000 : err?5200:2600);
@@ -682,13 +703,17 @@ async function boot(){
     saveBoot();
     S.offline=false;
     flushQueue();
-    await load();
+    restoreCache();
+    // Возвращаемся туда, где человек был: экран, лид, открытое касание
+    return await restorePlace();
   }catch(e){
     if(isOffline(e) && cached?.prof){
       S.prof=cached.prof; S.tariffs=cached.tariffs||[]; S.staff=cached.staff||[]; S.segments=cached.segments||[]; S.offline=true;
       if(cached.stages?.length) S.stages=cached.stages;
       if(cached.lostReasons?.length) S.lostReasons=cached.lostReasons;
       S.touchCfg=touchCfg(cached.touchCfg); applyDicts();
+      // Без связи показываем сохранённый экран «Сегодня», а не пустоту
+      restoreCache(); const t0=CACHE.get('today'); if(t0){ applyPatch('today', t0); S.curKey='today'; }
       toast('Нет связи. Показываю сохранённое, касания встанут в очередь');
     } else if(isOffline(e)){ S.offline=true; }
     else toast(e.message, true);
@@ -701,36 +726,39 @@ function saveBoot(){
     stages:S.stages, lostReasons:S.lostReasons, touchCfg:S.touchCfg});
 }
 
-async function load(){
-  if(S.view==='today'){
-    const [data, stats, plan, streak, notes, team] = await Promise.all([
+// Данные экрана одним объектом, без записи в S: пока ответ идёт, человек может уйти
+// на другой экран, и чужие данные не должны лечь поверх того, что он видит.
+async function fetchView(v){
+  if(v==='today'){
+    const [data, stats, plan, streak, notes, team, learn] = await Promise.all([
       db('v_today?select=*'), db('v_stats?select=*'), db('v_plan_today?select=*'),
       rpc('plan_streak', {}).catch(()=>0),
       isAdmin() ? [] : db('coaching_notes?read_at=is.null&select=*&order=created_at.desc'),
       isAdmin() ? db('v_team_today?select=*&order=name') : [],
+      isAdmin() ? {} : loadLearn(true),
     ]);
-    S.data=data; S.stats=stats[0]; S.plan=plan[0]||null; S.streak=streak||0; S.notes=notes; S.team=team;
-    if(!isAdmin()) await loadLearn(true);
-  } else if(S.view==='team'){
-    const [team, invites] = await Promise.all([
+    return { data, stats:stats[0], plan:plan[0]||null, streak:streak||0, notes, team, ...learn };
+  }
+  if(v==='team'){
+    const [team, invites, staff] = await Promise.all([
       db('v_team_today?select=*&order=name'),
-      db('invites?used_at=is.null&select=*&order=created_at.desc') ]);
-    S.team=team; S.invites=invites;
-    S.staff = await db('profiles?select=id,name,role,active,started_at,ramp_enabled&order=name');
-  } else if(S.view==='person'){
-    await loadPerson();
-  } else if(S.view==='norms'){
+      db('invites?used_at=is.null&select=*&order=created_at.desc'),
+      db('profiles?select=id,name,role,active,started_at,ramp_enabled&order=name') ]);
+    return { team, invites, staff };
+  }
+  if(v==='person') return loadPerson();
+  if(v==='norms'){
     const [d, r] = await Promise.all([db('plan_defaults?select=*'), db('ramp_steps?select=*&order=week')]);
-    S.defaults=d[0]; S.ramp=r;
-  } else if(S.view==='settings'){
-    const [t, sg] = await Promise.all([db('tariffs?select=*&order=sort_order'),
+    return { defaults:d[0], ramp:r };
+  }
+  if(v==='settings'){
+    const [tariffs, segments] = await Promise.all([db('tariffs?select=*&order=sort_order'),
       db('segments?select=*&order=sort_order,name'), loadDicts()]);
-    S.tariffs=t; S.segments=sg; saveBoot();
-  } else if(S.view==='learn'){
-    await loadLearn();
-  } else if(S.view==='report'){
-    await loadReport();
-  } else if(S.view==='list'){
+    return { tariffs, segments };
+  }
+  if(v==='learn') return loadLearn();
+  if(v==='report') return loadReport();
+  if(v==='list'){
     let f='';
     if(S.filter==='open') f = `&status=not.in.(won,lost)`;
     else if(S.filter!=='all') f = `&status=eq.${S.filter}`;
@@ -741,8 +769,74 @@ async function load(){
     else if(S.own==='none') f += `&owner_id=is.null`;
     if(S.q) groups.push(searchGroup(S.q));
     if(groups.length) f += `&and=${encodeURIComponent('('+groups.join(',')+')')}`;
-    S.data = await db(`v_leads?select=*${f}&order=score.desc,company_name.asc`);
+    return { data: await db(`v_leads?select=*${f}&order=score.desc,company_name.asc`) };
   }
+  return {};
+}
+
+/* ─────────── ПАМЯТЬ ЭКРАНОВ ───────────
+   Каждый экран помнит последние данные и место прокрутки. Переход показывает
+   сохранённое сразу, свежие данные подтягиваются тихо. Раньше любой переход
+   показывал крутилку, грузил всё заново и выбрасывал в начало списка. */
+const CACHE = new Map();       // ключ экрана → данные экрана
+const SCROLL = {};             // ключ экрана → прокрутка
+let NAV = 0;                   // номер перехода: ответ старого перехода не рисуем
+const MAIN_TABS = ['today','list','more','team','learn'];
+
+function viewKey(v=S.view){
+  if(v==='list') return `list|${S.filter}|${S.own}|${S.q}`;
+  if(v==='report') return `report|${S.period}|${S.repWho}`;
+  if(v==='person') return `person|${S.person?.id}`;
+  if(v==='lead') return `lead|${S.lead?.id}`;
+  return v;
+}
+// Кэш переживает перезапуск: телефон выгружает приложение, пока идёт звонок,
+// и без этого возврат показывал бы крутилку вместо последнего экрана.
+function cacheSet(key, val){
+  CACHE.delete(key); CACHE.set(key, val);
+  while(CACHE.size>24) CACHE.delete(CACHE.keys().next().value);
+  clearTimeout(cacheSet.t); cacheSet.t=setTimeout(persistCache, 800);
+}
+function persistCache(){
+  try{
+    const keep=[...CACHE.entries()].filter(([k])=>!k.startsWith('report|')).slice(-10);
+    localStorage.setItem('viewcache', JSON.stringify({who:S.prof?.id, at:Date.now(), items:keep}));
+  }catch{ try{ localStorage.removeItem('viewcache'); }catch{} }
+}
+function restoreCache(){
+  const c=LS.get('viewcache');
+  if(!c || c.who!==S.prof?.id || Date.now()-c.at>3*86400e3) return;
+  (c.items||[]).forEach(([k,v])=>CACHE.set(k,v));
+}
+function rememberScroll(){ if(S.curKey) SCROLL[S.curKey]=window.scrollY; }
+function scrollToKey(key){ const y=SCROLL[key]||0; requestAnimationFrame(()=>window.scrollTo(0,y)); }
+// Человек печатает в поле на экране — тихое обновление не должно стереть ввод
+const typing = () => { const a=document.activeElement;
+  return a && a.id!=='q' && document.getElementById('app').contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName); };
+function applyPatch(key, patch){
+  Object.assign(S, patch);
+  if('data' in patch) S.dataKey = key;
+}
+
+// Лид поменялся на месте (касание, отложен, удалён) — правим его строку во всех
+// сохранённых списках, чтобы не показывать устаревшее до фонового обновления.
+function patchLeadEverywhere(id, fields, drop){
+  const today=iso(new Date());
+  for(const [k,v] of CACHE){
+    if(!Array.isArray(v?.data)) continue;
+    const i=v.data.findIndex(r=>r.id===id); if(i<0) continue;
+    const r={...v.data[i], ...(fields||{})};
+    const gone = drop || (k==='today' && (['new','won','lost'].includes(r.status) || (r.next_action_at && r.next_action_at>today)));
+    v.data = gone ? v.data.filter(x=>x.id!==id) : v.data.map((x,j)=>j===i?r:x);
+    if(S.dataKey===k) S.data=v.data;
+  }
+  if(drop) CACHE.delete('lead|'+id);
+  clearTimeout(cacheSet.t); cacheSet.t=setTimeout(persistCache, 800);
+}
+function findLeadRow(id){
+  const hit=(S.data||[]).find(r=>r.id===id); if(hit) return hit;
+  for(const v of CACHE.values()){ const r=Array.isArray(v?.data) && v.data.find(x=>x.id===id); if(r) return r; }
+  return null;
 }
 
 // Экраны lead/add/imp — вложенные: с них возвращаемся туда, откуда пришли.
@@ -764,25 +858,49 @@ async function popScreen(){
   return go(prev.view, false);
 }
 
+// Карточка открывается сразу: строка из списка уже содержит почти всё, журнал
+// и контакты догружаются. Повторное открытие того же лида обновляет его на месте.
 async function openLead(id, push=true){
   if(push && S.view!=='lead') pushScreen();
-  S.busy=true; S.qFocus=false; render();
+  const same = S.view==='lead' && S.lead?.id===id;
+  rememberScroll();
+  const key='lead|'+id, tok=++NAV, hit=CACHE.get(key);
+  S.qFocus=false; S.pick=null; S.view='lead'; S.curKey=key;
+  if(!same){
+    S.callScript=null;
+    if(hit){ applyPatch(key, hit); S.leadPartial=false; S.busy=false; }
+    else{
+      const row=findLeadRow(id);
+      S.lead=row||null; S.log=[]; S.contacts=[]; S.leadPartial=!!row; S.busy=!row;
+    }
+    render(); window.scrollTo(0,0);
+  }
   try{
-    // Параллельно: на плохой связи четыре запроса подряд — это секунды до карточки.
+    // Параллельно: на плохой связи запросы подряд — это секунды до карточки.
     // Скрипты перечитываем каждый раз: иначе новый скрипт от админа менеджер
     // увидит только после перезапуска приложения.
     const [lead, log, scripts] = await Promise.all([
       db(`v_leads?id=eq.${id}&select=*`),
       db(`activities?lead_id=eq.${id}&select=*&order=created_at.desc`),
       db('scripts?select=*&order=sort_order').catch(()=>S.scripts) ]);
-    S.lead=lead[0]; S.log=log; S.scripts=scripts;
-    if(!S.lead) throw new Error('Лид не найден: возможно, его удалили');
-    S.contacts = await db(`contacts?company_id=eq.${S.lead.company_id}&select=*`
+    if(!lead[0]) throw new Error('Лид не найден: возможно, его удалили');
+    const contacts = await db(`contacts?company_id=eq.${lead[0].company_id}&select=*`
       + `&order=is_decision_maker.desc,is_primary.desc,created_at.asc`);
-    S.callScript=null;
-    S.view='lead';
-  }catch(e){ toast(e.message,true); }
-  S.busy=false; render();
+    const patch={ lead:lead[0], log, contacts };
+    cacheSet(key, patch);
+    S.scripts=scripts;
+    patchLeadEverywhere(id, lead[0]);
+    if(tok!==NAV) return;
+    applyPatch(key, patch); S.leadPartial=false; S.busy=false;
+    if(!typing()) render();
+  }catch(e){
+    if(tok!==NAV) return;
+    S.busy=false; S.leadPartial=false;
+    if(e.message.startsWith('Лид не найден')) patchLeadEverywhere(id, null, true);
+    toast(e.message,true);
+    if(!S.lead) return popScreen();
+    render();
+  }
 }
 
 // Следующий из очереди на сегодня, минуя экран «Сегодня». Тот, кого только что
@@ -798,12 +916,158 @@ async function nextLead(){
 
 async function go(v, push=true){
   // Переход на любую основную вкладку сбрасывает стек: возвращаться некуда
-  if(['today','list','more','team','learn'].includes(v)) S.back.length=0;
+  if(MAIN_TABS.includes(v)) S.back.length=0;
   else if(push && v!==S.view) pushScreen();
   if(v!=='list'){ S.qFocus=false; S.pick=null; }
-  S.view=v; S.busy=true; render();
-  try{ await load(); }catch(e){ toast(e.message,true); }
-  S.busy=false; render();
+  rememberScroll();
+  S.view=v;
+  const key=viewKey(v), tok=++NAV, hit=CACHE.get(key);
+  S.curKey=key;
+  if(hit){ applyPatch(key, hit); S.busy=false; render(); scrollToKey(key); }
+  else{ S.busy=true; render(); if(!(v==='list' && S.dataKey?.startsWith('list|'))) window.scrollTo(0,0); }
+  await loadInto(v, key, tok, !!hit);
+}
+
+// Тот же экран, свежие данные, без крутилки и без сброса прокрутки:
+// после сохранения, по жесту «потянуть вниз», при возврате в приложение.
+async function refreshView(){
+  if(S.view==='lead' && S.lead) return openLead(S.lead.id, false);
+  const key=viewKey(), tok=++NAV;
+  await loadInto(S.view, key, tok, true);
+}
+
+async function loadInto(v, key, tok, quiet){
+  try{
+    const patch=await fetchView(v);
+    const old=CACHE.get(key);
+    cacheSet(key, patch);
+    if(tok!==NAV) return;
+    const same = old && JSON.stringify(old)===JSON.stringify(patch);
+    applyPatch(key, patch);
+    const wasBusy=S.busy; S.busy=false;
+    if(wasBusy || (!same && !typing())) render();
+  }catch(e){
+    if(tok!==NAV) return;
+    if(!quiet || !isOffline(e)) toast(e.message,true);
+    if(S.busy){ S.busy=false; render(); }
+  }
+}
+
+/* ─────────── ЛИСТЫ И ЧЕРНОВИКИ ───────────
+   Лист снизу (касание, заметка, контакт, редакторы) открывается через openSheet.
+   Фон закрывает лист, только если в нём ничего не введено. «Назад» на Android
+   закрывает лист, а не уводит экран под ним. Введённое сохраняется на телефоне
+   при каждом нажатии: свернул приложение, телефон его выгрузил, пока шёл звонок, —
+   при возврате всё на месте. */
+const SHEETS = [];
+function openSheet(d, o={}){
+  const sh={ d, name:o.name||null, arg:o.arg||null, dirty:o.dirty||(()=>false) };
+  SHEETS.push(sh); document.body.appendChild(d); document.body.classList.add('sheeted');
+  // Своя запись в истории: системный «назад» снимет её и закроет лист
+  try{ history.pushState({depth:S.back.length, sheet:true}, ''); }catch{}
+  d.addEventListener('click', e=>{ if(e.target===d && !sh.dirty()) closeSheet(d); });
+  savePlace();
+  return d;
+}
+function closeSheet(d){
+  const i=SHEETS.findIndex(x=>x.d===d); if(i>=0) SHEETS.splice(i,1);
+  d.remove();
+  if(!SHEETS.length) document.body.classList.remove('sheeted');
+  savePlace();
+}
+
+const DRAFT_TTL = 3*86400e3;
+const draftGet = k => { const v=LS.get('draft:'+k); return v && Date.now()-v.at<DRAFT_TTL ? v : null; };
+const draftDel = k => LS.del('draft:'+k);
+function draftList(prefix){
+  const out=[];
+  try{
+    const keys=[]; for(let i=0;i<localStorage.length;i++) keys.push(localStorage.key(i));
+    keys.filter(k=>k.startsWith('draft:'+prefix)).forEach(k=>{ const v=draftGet(k.slice(6));
+      if(v) out.push({key:k.slice(6), ...v}); else localStorage.removeItem(k); });
+  }catch{}
+  return out.sort((a,b)=>b.at-a.at);
+}
+// Снимок формы: поля с id, выбранные чипы в лентах с id, раскрытые «Подробнее»
+function snapForm(root){
+  const f={}, c={};
+  root.querySelectorAll('input[id],textarea[id],select[id]').forEach(el=>{ f[el.id]= el.type==='checkbox'?el.checked:el.value; });
+  root.querySelectorAll('.chips[id]').forEach(w=>{ const on=w.querySelector('.chip.on');
+    if(on){ const k=Object.keys(on.dataset)[0]; if(k) c[w.id]=on.dataset[k]; } });
+  const o=[...root.querySelectorAll('.more.open[id]')].map(b=>b.id);
+  return {f,c,o};
+}
+function applyForm(root, s){
+  Object.entries(s.f||{}).forEach(([id,v])=>{ const el=root.querySelector('#'+CSS.escape(id)); if(!el) return;
+    if(el.type==='checkbox') el.checked=!!v; else el.value=v; });
+  Object.entries(s.c||{}).forEach(([id,v])=>{ const w=root.querySelector('#'+CSS.escape(id)); if(!w) return;
+    const chips=[...w.querySelectorAll('.chip')], hit=chips.find(ch=>Object.values(ch.dataset)[0]===v);
+    if(hit){ chips.forEach(ch=>ch.classList.remove('on')); hit.classList.add('on'); } });
+  (s.o||[]).forEach(id=>{ const b=root.querySelector('#'+CSS.escape(id)); if(b && !b.classList.contains('open')) b.click(); });
+}
+// Подключает черновик к форме. Вызывать после того, как обработчики уже навешаны.
+// extra — своё состояние формы помимо полей (например, выбранный этап).
+function useDraft(root, key, meta={}, o={}){
+  const snap=()=>({...snapForm(root), x:o.extra?.()});
+  const initial=JSON.stringify(snap());
+  const saved=draftGet(key);
+  if(saved?.s){
+    applyForm(root, saved.s); o.onRestore?.(saved);
+    const sub=root.querySelector('[data-draftnote]');
+    if(sub) sub.hidden=false;
+    if(sub) sub.textContent=`Черновик от ${new Date(saved.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})} восстановлен`;
+  }
+  const dirty=()=>JSON.stringify(snap())!==initial;
+  const save=()=>{ if(!root.isConnected) return;
+    if(dirty()) LS.set('draft:'+key, {...meta, at:Date.now(), s:snap()}); else draftDel(key); };
+  let t; const later=()=>{ clearTimeout(t); t=setTimeout(save, 250); };
+  root.addEventListener('input', later); root.addEventListener('change', later);
+  root.addEventListener('click', ()=>setTimeout(save, 0));
+  return { dirty, clear:()=>{ clearTimeout(t); draftDel(key); }, save };
+}
+// «Отмена» при введённом тексте не стирает его молча: лист закрывается,
+// черновик остаётся, а стереть можно кнопкой в сообщении.
+function cancelSheet(d, dr){
+  closeSheet(d);
+  if(dr?.dirty()){ dr.save(); toast('Черновик сохранён', false, {label:'Стереть', ghost:true, fn:()=>{ dr.clear(); render(); }}); }
+  render();
+}
+
+/* ─────────── МЕСТО ───────────
+   Где человек был: экран, лид, фильтры, открытый лист. Телефон выгружает
+   приложение, пока идёт звонок, и без этого возврат начинался с «Сегодня». */
+function savePlace(){
+  if(!S.prof) return;
+  const top=SHEETS.at(-1);
+  LS.set('place', { who:S.prof.id, at:Date.now(), view:S.view, leadId:S.lead?.id||null,
+    personId:S.person?.id||null, lessonId:S.lesson?.id||null, editingId:S.editing?.id||null,
+    filter:S.filter, own:S.own, q:S.q, period:S.period, repTab:S.repTab, repWho:S.repWho,
+    back:S.back, sheet:top?.name||null, sheetArg:top?.arg||null, scroll:{...SCROLL, [S.curKey]:window.scrollY} });
+}
+async function restorePlace(){
+  const p=LS.get('place');
+  if(!p || p.who!==S.prof.id || Date.now()-p.at>12*3600e3) return go('today');
+  Object.assign(S, { filter:p.filter||'all', own:p.own||'mine', q:p.q||'', period:p.period||'today',
+    repTab:p.repTab||'sum', repWho:p.repWho||'all' });
+  Object.assign(SCROLL, p.scroll||{});
+  S.back = Array.isArray(p.back) ? p.back : [];
+  // Записи в истории браузера после перезапуска пропали — возвращаем, чтобы «назад» работал
+  for(let i=1;i<=S.back.length;i++){ try{ history.pushState({depth:i}, ''); }catch{} }
+  const v=p.view;
+  if(v==='lead' && p.leadId){
+    await openLead(p.leadId, false);
+    if(S.view==='lead' && S.lead && p.sheet==='touch' && draftGet('touch:'+p.leadId)) touchSheet();
+    else if(S.view==='lead' && S.lead && p.sheet==='note' && draftGet('note:'+p.leadId)) leadNoteSheet();
+    return;
+  }
+  if(v==='add'){
+    if(p.editingId){ await openLead(p.editingId, false); if(S.lead){ S.editing=S.lead; return go('add'); } return; }
+    S.editing=null; return go('add');
+  }
+  if(v==='person'){ S.person=S.staff.find(u=>u.id===p.personId); if(!S.person) return go('today'); }
+  if(v==='lesson'){ return go(isAdmin()?'team':'learn'); }
+  const known=['today','list','more','team','learn','report','person','norms','settings','imp'];
+  return go(known.includes(v)?v:'today', false);
 }
 
 /* ─────────── ЭКРАНЫ ─────────── */
@@ -820,6 +1084,7 @@ function render(){
   app.className = (S.view==='lead' && S.lead && !S.busy) || (S.view==='list' && S.pick) ? 'docked' : '';
   app.innerHTML = v() + navBar();
   bind();
+  savePlace();
   // Поиск перерисовывает экран, и поле ввода создаётся заново. Возвращаем в него
   // фокус и курсор, иначе клавиатура на телефоне закрывается после каждой паузы.
   if(S.view==='list' && S.qFocus){
@@ -940,7 +1205,10 @@ function todayScreen(){
   const mk='exp-'+monthKey().slice(0,7);
   const exp = isAdmin() && new Date().getDate()<=3 && !LS.get(mk)
     ? `<button class="notice" id="exp"><b>Первое число</b> сделай выгрузку в Excel: бэкапов нет<span class="go">Выгрузить</span></button>` : '';
-  return head+`<div class="wrap">${stats}${queue}${exp}${planBlock(S.plan, S.streak)}${notes}${lessonOfDay()}${team}${rows}${foot}</div>`;
+  // Недописанные касания: свернул приложение посреди записи — продолжить в одно нажатие
+  const drafts = draftList('touch:').map(x=>`<button class="notice" data-draft-lead="${esc(x.lead)}">
+    <span><b>Недописанное касание</b> ${esc(x.company||'')}</span><span class="go">Продолжить</span></button>`).join('');
+  return head+`<div class="wrap">${stats}${drafts}${queue}${exp}${planBlock(S.plan, S.streak)}${notes}${lessonOfDay()}${team}${rows}${foot}</div>`;
 }
 
 // Полоска на метрику, справа факт/план моноширинным. Засечка — где надо быть к этому часу.
@@ -1021,7 +1289,10 @@ function listScreen(){
     <div class="chips">${f.map(([k,v])=>
       `<button class="chip ${S.filter===k?'on':''}" data-f="${k}">${v}</button>`).join('')}</div>
   </div>`;
-  if(S.busy) return head+`<div class="spin"></div>`;
+  // Новый поиск или фильтр: прежние строки остаются видны приглушёнными, пока идёт
+  // ответ. Раньше экран на каждую паузу в наборе мигал крутилкой.
+  const stale = S.busy && S.dataKey?.startsWith('list|');
+  if(S.busy && !stale) return head+`<div class="spin"></div>`;
   const rows = S.data.length ? S.data.map(row).join('')
     : `<div class="empty"><div class="big">∅</div><p>Ничего не найдено</p>
        <p class="hint">Смени фильтр или добавь лид кнопкой «+»</p></div>`;
@@ -1034,12 +1305,14 @@ function listScreen(){
   const bar = S.pick ? `<div class="dock" style="grid-template-columns:1fr">
     <button class="btn" id="pk_go" ${S.pick.size?'':'disabled'}>${S.pick.size
       ? `Назначить ответственного · ${S.pick.size}` : 'Отметь лиды в списке'}</button></div>` : '';
-  return head+`<div class="wrap" style="padding-top:0">${pickBtn}${rows}</div>${bar}`;
+  return head+`<div class="wrap" style="padding-top:0">${pickBtn}<div class="${stale?'stale':''}">${rows}</div></div>${bar}`;
 }
 
 /* ── КАРТОЧКА ── */
 function leadScreen(){
-  const l=S.lead; if(!l) return '';
+  const l=S.lead;
+  if(!l) return `<div class="topbar"><button class="back" data-back>‹</button><h1>Лид</h1></div><div class="spin"></div>`;
+  const loading = S.leadPartial ? '<p style="margin:0 0 4px;color:var(--dim);font-size:14px">Загружаю…</p>' : '';
   const wa = l.primary_phone ? `https://wa.me/${l.primary_phone.replace('+','')}` : null;
   const head=`<div class="topbar"><button class="back" data-back>‹</button>
     <h1>${esc(l.company_name)}<span class="sub">${STATUS[l.status]}${
@@ -1073,8 +1346,8 @@ function leadScreen(){
   const dm = `<div class="card">
     <h3>Контакты · ${S.contacts.length}</h3>
     ${S.contacts.length ? S.contacts.map(contactRow).join('')
-      : '<p style="margin:0 0 4px;color:var(--dim);font-size:14px">Контактов пока нет</p>'}
-    <button class="btn ghost" style="margin-top:12px" data-addct>Добавить контакт</button>
+      : loading || '<p style="margin:0 0 4px;color:var(--dim);font-size:14px">Контактов пока нет</p>'}
+    <button class="btn ghost" style="margin-top:12px" data-addct>${draftGet(`contact:${l.id}:new`)?'Дописать контакт':'Добавить контакт'}</button>
   </div>`;
 
   const info=`<div class="card"><h3>Компания</h3>
@@ -1125,7 +1398,7 @@ function leadScreen(){
 
   const log=`<div class="card"><h3>Журнал · ${S.log.length}</h3>
     ${S.log.length?`<div class="log">${S.log.map(ev).join('')}</div>`
-    :`<p style="margin:0;color:var(--dim);font-size:14px">Касаний пока не было</p>`}</div>`;
+    : loading || `<p style="margin:0;color:var(--dim);font-size:14px">Касаний пока не было</p>`}</div>`;
 
   const takeBtn = (!l.owner_id && !isAdmin())
     ? `<button class="btn ghost" data-take>Взять себе</button>` : '';
@@ -1138,7 +1411,7 @@ function leadScreen(){
     <button class="btn ghost" id="own_save" style="margin-top:10px">Переназначить</button>
   </div>` : '';
   const btns=`${takeBtn}
-    <button class="btn ghost" data-note-lead>Заметка или отложить</button>
+    <button class="btn ghost" data-note-lead>${draftGet('note:'+l.id)?'Дописать заметку':'Заметка или отложить'}</button>
     <button class="btn ghost" data-edit>Изменить карточку</button>
     ${isAdmin()?`<button class="btn warn" data-del>Удалить лид</button>`:''}`;
   // Главное действие закреплено над навигацией, чтобы не листать карточку после звонка
@@ -1147,7 +1420,7 @@ function leadScreen(){
       ? `<a class="dcall" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`
       : `<span class="dcall" disabled>${IC.phone}</span>`}
     <button class="dscript" data-script>Скрипт</button>
-    <button class="btn" data-touch>Записать касание</button>
+    <button class="btn" data-touch>${draftGet('touch:'+l.id)?'Дописать касание':'Записать касание'}</button>
   </div>`;
 
   return head+`<div class="wrap">${acts}${dm}${info}${deal}${pay}${extra}${reassign}${log}${btns}</div>`+dock;
@@ -1182,8 +1455,10 @@ function dayLabel(n){
 }
 function touchSheet(){
   const l=S.lead;
-  const clientId=uuid();
+  // Идентификатор касания живёт в черновике: повтор после обрыва не создаст дубль
+  const clientId=draftGet('touch:'+l.id)?.clientId||uuid();
   const cfg=S.touchCfg;
+  let dr=null;
   // Этапы, на которые можно перейти из касания: все включённые, кроме «Новый»,
   // «Не дозвонился» и «Отказ» — их ставят исход звонка и база
   const nextSt=S.stages.filter(s=>s.active && !['new','no_answer','lost'].includes(s.code));
@@ -1240,6 +1515,7 @@ function touchSheet(){
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 2px;font-size:19px">Касание</h2>
     <p style="margin:0 0 4px;color:var(--muted);font-size:13.5px">${esc(l.company_name)}</p>
+    <p class="note" data-draftnote hidden style="margin:0 0 4px;color:var(--warn)"></p>
     ${blocks}
     <div id="lostBox" style="display:none">
       <label for="lr">Причина отказа</label>
@@ -1249,7 +1525,7 @@ function touchSheet(){
     <p class="note" id="stHint" style="margin-top:10px"></p>
     <div class="sfoot"><button class="btn ghost" id="cancel">Отмена</button><button class="btn" id="save">Сохранить</button></div>
   </div>`;
-  document.body.appendChild(d);
+  openSheet(d, {name:'touch', arg:l.id, dirty:()=>!!dr?.dirty()});
   const $=id=>d.querySelector('#'+id);
   const shown=id=>tBlock(id).on;
 
@@ -1302,9 +1578,10 @@ function touchSheet(){
       if(id==='demo' && b.dataset.v && ['new','no_answer','contacted'].includes(stVal)) setSt('brief_done');
     }; });
   autoStatus('answered'); // исход по умолчанию тоже подчиняется правилу, а не только нажатие
+  dr=useDraft(d, 'touch:'+l.id, {lead:l.id, company:l.company_name, clientId},
+    { extra:()=>({st:stVal}), onRestore:v=>{ if(v.s.x?.st) stVal=v.s.x.st; relabel(); setSt(stVal); } });
 
-  $('cancel').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  $('cancel').onclick=()=>cancelSheet(d, dr);
 
   $('save').onclick=async()=>{
     const btn=$('save'); btn.disabled=true; btn.textContent='Сохраняю…';
@@ -1345,14 +1622,16 @@ function touchSheet(){
                           phone:nc.phone, phone_raw:nc.raw||null, dm:nc.dm} : null,
         script_id:S.callScript?.script_id||null, objection_id:S.callScript?.objection_id||null,
         demo: gv('demo')||null });
-      d.remove(); await openLead(S.lead.id, false);
+      dr.clear(); closeSheet(d); S.callScript=null;
+      patchLeadEverywhere(l.id, {status:r?.status||status, next_action_at:patch.next_action_at, next_action:patch.next_action});
+      await openLead(l.id, false);
       if(r?.auto_closed) toast('Записано. Пять недозвонов подряд — лид закрыт',
         false, {label:'Следующий →', fn:nextLead});
       else toast('Записано', false, {label:'Следующий →', fn:nextLead});
     }catch(e){
       if(isOffline(e)){
         queueAdd({args:lastTouchArgs});
-        d.remove(); toast('Нет связи. Касание сохранено на телефоне, отправлю, как появится сеть');
+        dr.clear(); closeSheet(d); toast('Нет связи. Касание сохранено на телефоне, отправлю, как появится сеть');
         render(); return;
       }
       toast(e.message,true); btn.disabled=false; btn.textContent='Сохранить';
@@ -1369,6 +1648,7 @@ function leadNoteSheet(){
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 4px;font-size:19px">Заметка</h2>
     <p style="margin:0 0 6px;color:var(--muted);font-size:13.5px">${esc(l.company_name)}</p>
+    <p class="note" data-draftnote hidden style="margin:0 0 4px;color:var(--warn)"></p>
     <label for="ln_text">Что запомнить</label>
     <textarea id="ln_text" placeholder="Например: владелец на месте после 14:00"></textarea>
     <label>Отложить лид</label>
@@ -1379,10 +1659,10 @@ function leadNoteSheet(){
       <button class="chip" data-d="90">На 3 месяца</button>
     </div>
     <p class="note" id="ln_hint" style="margin-top:6px"></p>
-    <button class="btn" id="ln_save">Сохранить</button>
-    <button class="btn ghost" id="ln_cancel">Отмена</button>
+    <div class="sfoot"><button class="btn ghost" id="ln_cancel">Отмена</button><button class="btn" id="ln_save">Сохранить</button></div>
   </div>`;
-  document.body.appendChild(d);
+  let dr=null;
+  openSheet(d, {name:'note', arg:l.id, dirty:()=>!!dr?.dirty()});
   const $=id=>d.querySelector('#'+id);
   let days='';
   const hint=()=>{ $('ln_hint').textContent = days
@@ -1391,8 +1671,9 @@ function leadNoteSheet(){
   $('ln_dt').onclick=e=>{ const b=e.target.closest('[data-d]'); if(!b) return;
     d.querySelectorAll('#ln_dt .chip').forEach(c=>c.classList.remove('on')); b.classList.add('on'); days=b.dataset.d; hint(); };
   hint();
-  $('ln_cancel').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  dr=useDraft(d, 'note:'+l.id, {lead:l.id, company:l.company_name},
+    { onRestore:()=>{ days=d.querySelector('#ln_dt .chip.on')?.dataset.d||''; hint(); } });
+  $('ln_cancel').onclick=()=>cancelSheet(d, dr);
   $('ln_save').onclick=async()=>{
     const text=$('ln_text').value.trim();
     if(!text && !days) return toast('Напиши заметку или выбери, на сколько отложить',true);
@@ -1408,9 +1689,11 @@ function leadNoteSheet(){
       next_action: days ? ('Вернуться: '+(text.split('\n')[0].slice(0,60)||'отложен')) : l.next_action,
       lost_reason:l.lost_reason||null, tariff:l.tariff||null, contact:null,
       script_id:null, objection_id:null };
-    try{ await rpc('log_touch', args); d.remove(); toast(days?'Отложен':'Записано'); await openLead(l.id,false); }
+    try{ await rpc('log_touch', args); dr.clear(); closeSheet(d); toast(days?'Отложен':'Записано');
+      if(days) patchLeadEverywhere(l.id, {status, next_action_at:args.next_action_at, next_action:args.next_action});
+      await openLead(l.id,false); }
     catch(e){
-      if(isOffline(e)){ queueAdd({args}); d.remove(); toast('Нет связи. Заметка сохранена на телефоне, отправлю, как появится сеть'); return; }
+      if(isOffline(e)){ queueAdd({args}); dr.clear(); closeSheet(d); toast('Нет связи. Заметка сохранена на телефоне, отправлю, как появится сеть'); return; }
       toast(e.message,true); btn.disabled=false; }
   };
 }
@@ -1457,6 +1740,7 @@ function contactSheet(existing){
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 4px;font-size:19px">${existing?'Контакт':'Новый контакт'}</h2>
     <p style="margin:0 0 6px;color:var(--muted);font-size:13.5px">${esc(S.lead.company_name)}</p>
+    <p class="note" data-draftnote hidden style="margin:0 0 4px;color:var(--warn)"></p>
     <label for="c_name">Имя</label>
     <input id="c_name" type="text" value="${esc(c.name||'')}" placeholder="Как зовут">
     <label for="c_pos">Должность</label>
@@ -1468,13 +1752,13 @@ function contactSheet(existing){
     <input id="c_phone" type="tel" inputmode="tel" value="${esc(c.phone_e164||'')}">
     <label class="check"><input type="checkbox" id="c_dm" ${c.is_decision_maker?'checked':''}>
       Это ЛПР — он принимает решение</label>
-    <button class="btn" id="c_save">Сохранить</button>
     ${existing && isAdmin() ? `<button class="btn warn" id="c_del">Удалить контакт</button>`:''}
-    <button class="btn ghost" id="c_cancel">Отмена</button>
+    <div class="sfoot"><button class="btn ghost" id="c_cancel">Отмена</button><button class="btn" id="c_save">Сохранить</button></div>
   </div>`;
-  document.body.appendChild(d);
-  d.querySelector('#c_cancel').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  let dr=null;
+  openSheet(d, {name:'contact', dirty:()=>!!dr?.dirty()});
+  dr=useDraft(d, `contact:${S.lead.id}:${c.id||'new'}`, {lead:S.lead.id, company:S.lead.company_name});
+  d.querySelector('#c_cancel').onclick=()=>cancelSheet(d, dr);
 
   d.querySelector('#c_save').onclick=async()=>{
     const b=d.querySelector('#c_save'); b.disabled=true; b.textContent='Сохраняю…';
@@ -1484,7 +1768,7 @@ function contactSheet(existing){
         name:d.querySelector('#c_name').value.trim(),
         position:d.querySelector('#c_pos').value.trim(),
         raw, phone:phone(raw), dm:d.querySelector('#c_dm').checked }, c.id);
-      d.remove(); toast('Сохранено'); await openLead(S.lead.id, false);
+      dr.clear(); closeSheet(d); toast('Сохранено'); await openLead(S.lead.id, false);
     }catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Сохранить'; }
   };
 
@@ -1492,7 +1776,7 @@ function contactSheet(existing){
   if(del) del.onclick=async()=>{
     if(!confirm('Удалить контакт?')) return;
     try{ await db(`contacts?id=eq.${c.id}`,{method:'DELETE',prefer:'return=minimal'});
-      d.remove(); toast('Удалено'); await openLead(S.lead.id, false);
+      closeSheet(d); toast('Удалено'); await openLead(S.lead.id, false);
     }catch(e){ toast(e.message,true); }
   };
 }
@@ -1509,7 +1793,8 @@ function addScreen(){
   const l=S.editing||{};
   const t=S.editing?'Изменить карточку':'Новый лид';
   return `<div class="topbar"><button class="back" data-back>‹</button><h1>${t}</h1></div>
-  <div class="wrap">
+  <div class="wrap" id="addForm">
+    <p class="note" data-draftnote hidden style="margin:0 0 4px;color:var(--warn)"></p>
     <label for="f_name">Название *</label>
     <input id="f_name" type="text" value="${esc(l.company_name||'')}" placeholder="Как называется заведение">
     <label for="f_phone">Телефон</label>
@@ -1617,13 +1902,17 @@ async function saveLead(){
           {company_id:S.editing.company_id, phone_e164:ph, phone_raw:g('f_phone'), is_primary:true})});
       }
       await saveDm(S.editing.company_id, ph || S.editing.primary_phone);
+      S.addDraft?.clear(); CACHE.delete('lead|'+S.editing.id);
+      // Возврат в ту же карточку: запись о ней в стеке «назад» уже не нужна
+      if(S.back.at(-1)?.view==='lead' && S.back.at(-1).leadId===S.editing.id) S.back.pop();
       const id=S.editing.id; S.editing=null; toast('Сохранено'); await openLead(id, false);
     }else{
       // Одной транзакцией: не остаётся компании-сироты, если лид не создался
       const id = await rpc('create_lead', { company:co, phone:ph, phone_raw:g('f_phone')||null,
         dm: hasDm ? {name:dm.name, position:dm.position, phone:dm.phone, phone_raw:dm.raw} : null,
         take:true });
-      toast('Лид создан'); await openLead(id);
+      // Форма нового лида в стек не кладётся: «назад» из карточки ведёт туда, откуда пришли
+      S.addDraft?.clear(); toast('Лид создан'); await openLead(id, false);
     }
   }catch(e){
     toast(e.message.includes('duplicate')?'Такая компания уже есть':e.message,true);
@@ -1695,13 +1984,12 @@ function scriptSheet(lead, initialStage){
       try{ await navigator.clipboard.writeText(fill(m.body, lead)); toast('Скопировано'); }
       catch{ toast('Не удалось скопировать: выдели текст пальцем', true); }
     });
-    d.querySelector('#sc_close').onclick=()=>d.remove();
+    d.querySelector('#sc_close').onclick=()=>closeSheet(d);
     // Выбранный этап может стоять за краем ленты чипов — подкручиваем к нему
     requestAnimationFrame(()=>d.querySelectorAll('.chips .chip.on').forEach(c=>{ const w=c.parentElement; w.scrollLeft=c.offsetLeft-w.offsetLeft-16; }));
   };
   draw();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
-  document.body.appendChild(d);
+  openSheet(d);
 }
 
 /* ── УЧЁБА ── */
@@ -1710,7 +1998,7 @@ async function loadLearn(light){
     light ? S.scripts : db('scripts?select=*&order=sort_order'),
     db('lessons?select=*&order=module,sort_order'),
     db(`lesson_progress?profile_id=eq.${S.prof.id}&select=*`) ]);
-  S.scripts=scripts; S.lessons=lessons; S.progress=progress;
+  return {scripts, lessons, progress};
 }
 const passedSet = ()=> new Set(S.progress.map(x=>x.lesson_id));
 // Первый непройденный урок: сначала те, у которых срок по неделе разгона ближе
@@ -1768,6 +2056,7 @@ function scriptEditor(x, newKind){
   const d=document.createElement('div'); d.className='sheet';
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 6px;font-size:19px">${isNew?'Новый':'Изменить'}</h2>
+    <p class="note" data-draftnote hidden style="margin:0 0 4px;color:var(--warn)"></p>
     <label for="se_kind">Тип</label>
     <select id="se_kind"><option value="script" ${x.kind==='script'?'selected':''}>Скрипт этапа</option>
       <option value="objection" ${x.kind==='objection'?'selected':''}>Возражение</option>
@@ -1787,18 +2076,18 @@ function scriptEditor(x, newKind){
     Сообщение открывается из карточки в WhatsApp уже с подставленным текстом.</p>
     <div class="two"><div><label for="se_order">Порядок</label><input id="se_order" type="number" inputmode="numeric" value="${x.sort_order}"></div>
       <div><label>&nbsp;</label><label class="check" style="padding:12px 0"><input type="checkbox" id="se_active" ${x.active?'checked':''}> Активен</label></div></div>
-    <button class="btn" id="se_save">Сохранить</button>
     ${isNew?'':`<button class="btn warn" id="se_del">Удалить</button>`}
-    <button class="btn ghost" id="se_cancel">Отмена</button>
+    <div class="sfoot"><button class="btn ghost" id="se_cancel">Отмена</button><button class="btn" id="se_save">Сохранить</button></div>
   </div>`;
-  document.body.appendChild(d);
+  let dr=null;
+  openSheet(d, {name:'script', dirty:()=>!!dr?.dirty()});
   const kind=d.querySelector('#se_kind'), box=d.querySelector('#se_stage_box');
   const sync=()=>{ box.style.display = kind.value==='script'?'block':'none';
     d.querySelector('#se_title_l').textContent = kind.value==='objection'?'Реплика клиента':'Название';
     d.querySelector('#se_body_l').textContent = kind.value==='objection'?'Ответ':'Текст'; };
   kind.onchange=sync; sync();
-  d.querySelector('#se_cancel').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  dr=useDraft(d, isNew?'script:new-'+x.kind:'script:'+x.id, {}, {onRestore:sync});
+  d.querySelector('#se_cancel').onclick=()=>cancelSheet(d, dr);
   d.querySelector('#se_save').onclick=async()=>{
     const body={ kind:kind.value, stage: kind.value==='script'?d.querySelector('#se_stage').value:null,
       segment: kind.value==='script'?(d.querySelector('#se_seg').value.trim()||null):null,
@@ -1808,14 +2097,14 @@ function scriptEditor(x, newKind){
     try{
       if(isNew) await db('scripts',{method:'POST',prefer:'return=minimal',body:JSON.stringify(body)});
       else await db(`scripts?id=eq.${x.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
-      d.remove(); toast('Сохранено'); S.scripts=[]; go('learn',false);
+      dr.clear(); closeSheet(d); toast('Сохранено'); refreshView();
     }catch(e){ toast(e.message,true); }
   };
   const del=d.querySelector('#se_del');
   if(del) del.onclick=async()=>{
     if(!confirm('Удалить? В журнале касаний ссылка на него очистится.')) return;
     try{ await db(`scripts?id=eq.${x.id}`,{method:'DELETE',prefer:'return=minimal'});
-      d.remove(); toast('Удалено'); S.scripts=[]; go('learn',false); }catch(e){ toast(e.message,true); }
+      dr.clear(); closeSheet(d); toast('Удалено'); refreshView(); }catch(e){ toast(e.message,true); }
   };
 }
 
@@ -1864,6 +2153,7 @@ function lessonEditor(l){
   const d=document.createElement('div'); d.className='sheet';
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 6px;font-size:19px">${isNew?'Новый урок':'Изменить урок'}</h2>
+    <p class="note" data-draftnote hidden style="margin:0 0 4px;color:var(--warn)"></p>
     <label for="le_module">Модуль</label>
     <select id="le_module">${Object.entries(MODULE).map(([k,v])=>`<option value="${k}" ${l.module===k?'selected':''}>${v}</option>`).join('')}</select>
     <label for="le_title">Название</label>
@@ -1876,13 +2166,13 @@ function lessonEditor(l){
     <div class="two"><div><label for="le_due">Пройти до недели</label><input id="le_due" type="number" inputmode="numeric" value="${l.due_week??''}" placeholder="—"></div>
       <div><label for="le_order">Порядок</label><input id="le_order" type="number" inputmode="numeric" value="${l.sort_order}"></div></div>
     <label class="check"><input type="checkbox" id="le_active" ${l.active?'checked':''}> Активен</label>
-    <button class="btn" id="le_save">Сохранить</button>
     ${isNew?'':`<button class="btn warn" id="le_del">Удалить</button>`}
-    <button class="btn ghost" id="le_cancel">Отмена</button>
+    <div class="sfoot"><button class="btn ghost" id="le_cancel">Отмена</button><button class="btn" id="le_save">Сохранить</button></div>
   </div>`;
-  document.body.appendChild(d);
-  d.querySelector('#le_cancel').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  let dr=null;
+  openSheet(d, {name:'lesson', dirty:()=>!!dr?.dirty()});
+  dr=useDraft(d, 'lesson:'+(isNew?'new':l.id));
+  d.querySelector('#le_cancel').onclick=()=>cancelSheet(d, dr);
   d.querySelector('#le_save').onclick=async()=>{
     const due=d.querySelector('#le_due').value.trim();
     const body={ module:d.querySelector('#le_module').value, title:d.querySelector('#le_title').value.trim(),
@@ -1892,14 +2182,14 @@ function lessonEditor(l){
     try{
       if(isNew) await db('lessons',{method:'POST',prefer:'return=minimal',body:JSON.stringify(body)});
       else await db(`lessons?id=eq.${l.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
-      d.remove(); toast('Сохранено'); S.lesson=null; go('learn');
+      dr.clear(); closeSheet(d); toast('Сохранено'); S.lesson=null; go('learn');
     }catch(e){ toast(e.message,true); }
   };
   const del=d.querySelector('#le_del');
   if(del) del.onclick=async()=>{
     if(!confirm('Удалить урок вместе с прогрессом по нему?')) return;
     try{ await db(`lessons?id=eq.${l.id}`,{method:'DELETE',prefer:'return=minimal'});
-      d.remove(); toast('Удалено'); S.lesson=null; go('learn'); }catch(e){ toast(e.message,true); }
+      dr.clear(); closeSheet(d); toast('Удалено'); S.lesson=null; go('learn'); }catch(e){ toast(e.message,true); }
   };
 }
 
@@ -1920,17 +2210,18 @@ function noteSheet(activityId){
     ${a?.comment?`<p class="note" style="margin:0 0 6px">«${esc(a.comment)}»</p>`:''}
     <label for="cn_text">Что сделать иначе</label>
     <textarea id="cn_text" placeholder="Коротко и по делу"></textarea>
-    <button class="btn" id="cn_save">Отправить</button>
-    <button class="btn ghost" id="cn_cancel">Отмена</button>
+    <p class="note" data-draftnote hidden style="margin:0 0 4px;color:var(--warn)"></p>
+    <div class="sfoot"><button class="btn ghost" id="cn_cancel">Отмена</button><button class="btn" id="cn_save">Отправить</button></div>
   </div>`;
-  document.body.appendChild(d);
-  d.querySelector('#cn_cancel').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  let dr=null;
+  openSheet(d, {name:'coach', dirty:()=>!!dr?.dirty()});
+  dr=useDraft(d, 'coach:'+activityId);
+  d.querySelector('#cn_cancel').onclick=()=>cancelSheet(d, dr);
   d.querySelector('#cn_save').onclick=async()=>{
     const text=d.querySelector('#cn_text').value.trim(); if(!text) return toast('Напиши замечание',true);
     try{ await db('coaching_notes',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
         {to_id:S.person.id, activity_id:activityId, text})});
-      d.remove(); toast('Отправлено'); go('person',false);
+      dr.clear(); closeSheet(d); toast('Отправлено'); refreshView();
     }catch(e){ toast(e.message,true); }
   };
 }
@@ -1949,15 +2240,14 @@ async function notesSheet(){
         <button class="chip on" data-nread="${n.id}">Понял</button></div></div>`).join('')}
     <button class="btn ghost" id="cn_close">Закрыть</button>
   </div>`;
-  document.body.appendChild(d);
-  d.querySelector('#cn_close').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  openSheet(d);
+  d.querySelector('#cn_close').onclick=()=>closeSheet(d);
   d.querySelectorAll('[data-nread]').forEach(b=>b.onclick=async()=>{
     try{ await db(`coaching_notes?id=eq.${b.dataset.nread}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({read_at:new Date().toISOString()})});
-      S.notes=S.notes.filter(n=>n.id!==b.dataset.nread); d.remove(); if(S.notes.length) notesSheet(); else render();
+      S.notes=S.notes.filter(n=>n.id!==b.dataset.nread); closeSheet(d); if(S.notes.length) notesSheet(); else render();
     }catch(e){ toast(e.message,true); }
   });
-  d.querySelectorAll('[data-nlead]').forEach(b=>b.onclick=()=>{ d.remove(); openLead(b.dataset.nlead); });
+  d.querySelectorAll('[data-nlead]').forEach(b=>b.onclick=()=>{ closeSheet(d); openLead(b.dataset.nlead); });
 }
 
 /* ── КОМАНДА ── */
@@ -2001,7 +2291,7 @@ function teamScreen(){
 }
 
 async function loadPerson(){
-  const p=S.person; if(!p) return;
+  const p=S.person; if(!p) return {};
   const [team, plans, prog, acts, notes] = await Promise.all([
     db(`v_team_today?profile_id=eq.${p.id}&select=*`),
     db(`plans?profile_id=eq.${p.id}&month=eq.${monthKey()}&select=*`),
@@ -2009,12 +2299,12 @@ async function loadPerson(){
     db(`activities?author_id=eq.${p.id}&channel=neq.system&select=*&order=created_at.desc&limit=10`),
     db(`coaching_notes?to_id=eq.${p.id}&select=*&order=created_at.desc&limit=20`),
   ]);
-  if(!S.lessons.length) S.lessons = await db('lessons?select=*&order=module,sort_order');
+  const lessons = S.lessons.length ? S.lessons : await db('lessons?select=*&order=module,sort_order');
   const ids=[...new Set(acts.map(a=>a.lead_id))];
   const leads = ids.length ? await db(`v_leads?id=in.(${ids.join(',')})&select=id,company_name`) : [];
   const nm=new Map(leads.map(l=>[l.id,l.company_name]));
   acts.forEach(a=>a.company_name=nm.get(a.lead_id)||'—');
-  S.personData={ today:team[0]||null, plan:plans[0]||null, progress:prog, acts, notes };
+  return { lessons, personData:{ today:team[0]||null, plan:plans[0]||null, progress:prog, acts, notes } };
 }
 
 function personScreen(){
@@ -2097,42 +2387,44 @@ function settingsScreen(){
   const warn = S.dictsLive ? '' : `<div class="notice"><span><b>Нужна миграция.</b> Выполни
     <span style="font-family:var(--mono)">db/18_settings.sql</span> в Supabase: пока её нет,
     этапы, причины отказа и форма касания показаны по умолчанию и не сохраняются.</span></div>`;
-  const arrows=(kind,code,i,n)=>`<span class="ord">
-      <button class="obtn" data-mv="${kind}:${esc(code)}:-1" ${i===0?'disabled':''} aria-label="Выше">↑</button>
-      <button class="obtn" data-mv="${kind}:${esc(code)}:1" ${i===n-1?'disabled':''} aria-label="Ниже">↓</button></span>`;
-  const drow=(kind,x,i,n,meta)=>`<div class="drow ${x.active===false?'off':''}">
-      <button class="dmain" data-dict="${kind}:${esc(x.code)}"><b>${esc(x.title)}</b>
-        <span>${meta.filter(Boolean).map(esc).join(' · ')}</span></button>
-      ${arrows(kind,x.code,i,n)}</div>`;
+  // Строка справочника: ручка ≡ для перетаскивания, название правится прямо здесь,
+  // ⋯ открывает остальное (видимость, скрипт этапа, цены)
+  const drow=(kind,x,meta)=>`<div class="drow ${x.active===false?'off':''}" data-code="${esc(x.code)}">
+      <span class="drag" aria-label="Перетащить">≡</span>
+      <div class="dcol"><input type="text" class="dti" data-title="${kind}:${esc(x.code)}" value="${esc(x.title)}" aria-label="Название">
+        <span class="dmeta">${meta.filter(Boolean).map(esc).join(' · ')}</span></div>
+      <button class="obtn" data-dict="${kind}:${esc(x.code)}" aria-label="Настроить">⋯</button></div>`;
+  const list=(kind,rows)=>`<div class="dlist" data-sort="${kind}">${rows}</div>`;
 
-  const stages=S.stages.map((s,i)=>drow('stage',s,i,S.stages.length,[
+  const stages=list('stage', S.stages.map(s=>drow('stage',s,[
     s.active?'':'выключен', FIXED_ST.includes(s.code)?'нужен базе':s.system?'':'свой',
-    s.in_pipeline?'в MRR':'', s.script_stage?'скрипт: '+STAGE[s.script_stage]:''])).join('');
-  const reasons=S.lostReasons.map((r,i)=>drow('lost',r,i,S.lostReasons.length,[
-    r.active?'':'выключена', r.code==='unreachable'?'ставит база после 5 недозвонов':r.system?'':'своя'])).join('');
-  const tariffs=S.tariffs.map((t,i)=>drow('tariff',t,i,S.tariffs.length,[
-    t.active===false?'выключен':'', `${money(t.setup_amount)} + ${money(t.mrr_amount)}/мес`])).join('');
+    s.in_pipeline?'в MRR':'', s.script_stage?'скрипт: '+STAGE[s.script_stage]:''])).join(''));
+  const reasons=list('lost', S.lostReasons.map(r=>drow('lost',r,[
+    r.active?'':'выключена', r.code==='unreachable'?'ставит база после 5 недозвонов':r.system?'':'своя'])).join(''));
+  const tariffs=list('tariff', S.tariffs.map(t=>drow('tariff',t,[
+    t.active===false?'выключен':'', `${money(t.setup_amount)} + ${money(t.mrr_amount)}/мес`])).join(''));
 
   const cfg=S.touchCfg;
-  const blocks=cfg.blocks.map((b,i)=>`<div class="drow ${b.on?'':'off'}">
+  const blocks=`<div class="dlist" data-sort="block">`+cfg.blocks.map(b=>`<div class="drow ${b.on?'':'off'}" data-code="${b.id}">
+      <span class="drag" aria-label="Перетащить">≡</span>
       <label class="check" style="flex:0 0 auto;padding:0 4px 0 0;margin:0"><input type="checkbox" data-tb-on="${b.id}" ${b.on?'checked':''} aria-label="Показывать"></label>
       <input type="text" class="tbt" data-tb-title="${b.id}" value="${esc(b.title)}" placeholder="${esc(TOUCH_BLOCKS[b.id])}">
-      ${arrows('block',b.id,i,cfg.blocks.length)}</div>`).join('');
+      </div>`).join('')+`</div>`;
 
   return head+`<div class="wrap">${warn}
-    <div class="card"><h3>Форма касания</h3>
-      <p class="note" style="margin:0 0 8px">Галочка — блок виден менеджеру. Подпись можно заменить своей,
+    <div class="card"><h3>Форма касания <span id="tf_state" style="text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim)"></span></h3>
+      <p class="note" style="margin:0 0 8px">Сохраняется сама. Перетащи за ≡, чтобы поменять порядок. Галочка — блок виден менеджеру. Подпись можно заменить своей,
       пустая — стандартная. Выключенный блок берёт значение по умолчанию: исход «Ответил», шаг через день по умолчанию.</p>
       ${blocks}
       <label for="tf_days">Чипы даты следующего шага, дней через запятую</label>
       <input id="tf_days" type="text" inputmode="numeric" value="${cfg.days.join(', ')}" style="font-family:var(--mono)">
       <label for="tf_day">Выбрано по умолчанию</label>
       <select id="tf_day">${cfg.days.map(n=>`<option value="${n}" ${n===cfg.day?'selected':''}>${dayLabel(n)}</option>`).join('')}</select>
-      <div class="two"><button class="btn ghost" id="tf_reset">По умолчанию</button><button class="btn" id="tf_save">Сохранить форму</button></div>
+      <button class="btn ghost" id="tf_reset">Вернуть стандартную форму</button>
     </div>
     <div class="card"><h3>Этапы воронки</h3>${stages}
       <button class="btn ghost" data-dict-new="stage">Добавить этап</button>
-      <p class="note">Нажми на этап, чтобы переименовать, выключить или выбрать скрипт.
+      <p class="note">Название правится прямо в строке. ≡ — перетащить, ⋯ — выключить или выбрать скрипт.
       «В MRR» — лиды на этапе считаются в сумме «В работе». Свой этап, как любой открытый, требует дату следующего шага.</p></div>
     <div class="card"><h3>Причины отказа</h3>${reasons}
       <button class="btn ghost" data-dict-new="lost">Добавить причину</button></div>
@@ -2166,25 +2458,72 @@ function dictErr(e){
   if(/duplicate/i.test(m)) return 'Такой код уже есть';
   return m;
 }
-async function reloadSettings(){ await go('settings', false); }
+async function reloadSettings(){ await refreshView(); }
 
-// Перестановка соседей: меняем местами sort_order двух строк
-async function moveDict(kind, code, dir){
+// Перетаскивание строки за ручку ≡. Строка едет за пальцем, соседи расступаются
+// сразу; по отпускании порядок сохраняется в фоне, экран не перезагружается.
+function initSort(box, done){
+  box.querySelectorAll('.drag').forEach(h=>h.onpointerdown=e=>{
+    const row=h.closest('.drow'); if(!row) return;
+    e.preventDefault(); h.setPointerCapture(e.pointerId);
+    const before=[...box.children].map(r=>r.dataset.code);
+    let y0=e.clientY; row.classList.add('dragging');
+    const move=ev=>{
+      let dy=ev.clientY-y0;
+      const prev=row.previousElementSibling, next=row.nextElementSibling;
+      // Двигаем соседа, а не саму строку: перенос строки в DOM сбросил бы захват пальца
+      if(prev && dy < -prev.offsetHeight/2){ box.insertBefore(prev, row.nextSibling); y0-=prev.offsetHeight; dy=ev.clientY-y0; }
+      else if(next && dy > next.offsetHeight/2){ box.insertBefore(next, row); y0+=next.offsetHeight; dy=ev.clientY-y0; }
+      row.style.transform=`translateY(${dy}px)`;
+    };
+    const up=()=>{
+      h.onpointermove=null; h.onpointerup=h.onpointercancel=null;
+      row.style.transform=''; row.classList.remove('dragging');
+      const after=[...box.children].map(r=>r.dataset.code);
+      if(after.join()!==before.join()) done(after);
+    };
+    h.onpointermove=move; h.onpointerup=h.onpointercancel=up;
+  });
+}
+async function saveOrder(kind, codes){
   if(kind==='block'){
-    readTouchForm(); // до поиска: readTouchForm собирает новый массив блоков
-    const b=S.touchCfg.blocks, i=b.findIndex(x=>x.id===code), j=i+dir;
-    if(j<0||j>=b.length) return;
-    [b[i],b[j]]=[b[j],b[i]]; return render();
+    S.touchCfg.blocks=codes.map(id=>S.touchCfg.blocks.find(b=>b.id===id));
+    return autosaveTouch();
   }
-  const D=DICT[kind], list=D.list(), i=list.findIndex(x=>x.code===code), j=i+dir;
-  if(j<0||j>=list.length) return;
-  // Одинаковые порядковые номера разводим заново, иначе обмен ничего не даст
-  const ord=list.map((x,k)=>(k+1)*10); [ord[i],ord[j]]=[ord[j],ord[i]];
+  const D=DICT[kind], list=D.list();
+  const changed=[];
+  codes.forEach((c,k)=>{ const x=list.find(y=>y.code===c); if(x && x.sort_order!==(k+1)*10){ x.sort_order=(k+1)*10; changed.push(x); } });
+  list.sort((a,b)=>a.sort_order-b.sort_order);
+  applyDicts(); saveBoot();
   try{
-    await Promise.all(list.map((x,k)=>x.sort_order===ord[k] ? null :
-      db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({sort_order:ord[k]})})));
-    await reloadSettings();
-  }catch(e){ toast(dictErr(e),true); }
+    await Promise.all(changed.map(x=>db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,
+      {method:'PATCH',prefer:'return=minimal',body:JSON.stringify({sort_order:x.sort_order})})));
+    toast('Порядок сохранён');
+  }catch(e){ toast(dictErr(e),true); refreshView(); }
+}
+async function saveTitle(kind, code, input){
+  const D=DICT[kind], x=D.list().find(y=>y.code===code); if(!x) return;
+  const title=input.value.trim();
+  if(!title){ input.value=x.title; return toast('Название не может быть пустым',true); }
+  if(title===x.title) return;
+  const old=x.title; x.title=title; applyDicts(); saveBoot();
+  try{ await db(`${D.table}?code=eq.${encodeURIComponent(code)}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({title})});
+    toast('Сохранено');
+  }catch(e){ x.title=old; input.value=old; applyDicts(); toast(dictErr(e),true); }
+}
+// Форма касания сохраняется сама через секунду после последней правки
+function autosaveTouch(){
+  const st=document.getElementById('tf_state'); if(st) st.textContent='· сохраняю…';
+  clearTimeout(autosaveTouch.t);
+  autosaveTouch.t=setTimeout(async()=>{
+    readTouchForm();
+    try{ await saveTouchForm(S.touchCfg);
+      const el=document.getElementById('tf_state'); if(el) el.textContent='· сохранено';
+      // Список «выбрано по умолчанию» зависит от чипов дат — обновляем его без перерисовки экрана
+      const sel=document.getElementById('tf_day');
+      if(sel && document.activeElement!==sel) sel.innerHTML=S.touchCfg.days.map(n=>`<option value="${n}" ${n===S.touchCfg.day?'selected':''}>${dayLabel(n)}</option>`).join('');
+    }catch(e){ const el=document.getElementById('tf_state'); if(el) el.textContent='· не сохранено'; toast(e.message,true); }
+  }, 900);
 }
 
 // Лист правки этапа, причины или тарифа
@@ -2212,10 +2551,9 @@ function dictSheet(kind, x){
     <div class="sfoot"><button class="btn ghost" id="ds_cancel">Отмена</button><button class="btn" id="ds_save">Сохранить</button></div>
     ${!isNew&&!x.system?`<button class="btn warn" id="ds_del">Удалить</button>`:''}
   </div>`;
-  document.body.appendChild(d);
+  openSheet(d);
   const $=id=>d.querySelector('#'+id);
-  $('ds_cancel').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  $('ds_cancel').onclick=()=>closeSheet(d);
   $('ds_save').onclick=async()=>{
     const body={ title:$('ds_title').value.trim(), active:$('ds_active').checked };
     if(!body.title) return toast('Впиши название',true);
@@ -2232,14 +2570,14 @@ function dictSheet(kind, x){
         body.sort_order=Math.max(0,...D.list().map(y=>y.sort_order||0))+10;
         await db(D.table,{method:'POST',prefer:'return=minimal',body:JSON.stringify(body)});
       } else await db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
-      d.remove(); toast('Сохранено'); await reloadSettings();
+      closeSheet(d); toast('Сохранено'); await reloadSettings();
     }catch(e){ toast(dictErr(e),true); }
   };
   const del=$('ds_del');
   if(del) del.onclick=async()=>{
     if(!confirm(`Удалить «${x.title}»?`)) return;
     try{ await db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,{method:'DELETE',prefer:'return=minimal'});
-      d.remove(); toast('Удалено'); await reloadSettings();
+      closeSheet(d); toast('Удалено'); await reloadSettings();
     }catch(e){ toast(dictErr(e),true); }
   };
 }
@@ -2274,16 +2612,15 @@ function assignSheet(){
       ${S.staff.filter(u=>u.active).map(u=>`<option value="${u.id}">${esc(u.name)}${u.role==='admin'?' (админ)':''}</option>`).join('')}</select>
     <div class="sfoot"><button class="btn ghost" id="as_cancel">Отмена</button><button class="btn" id="as_save">Назначить</button></div>
   </div>`;
-  document.body.appendChild(d);
-  d.querySelector('#as_cancel').onclick=()=>d.remove();
-  d.onclick=e=>{ if(e.target===d) d.remove(); };
+  openSheet(d);
+  d.querySelector('#as_cancel').onclick=()=>closeSheet(d);
   d.querySelector('#as_save').onclick=async()=>{
     const v=d.querySelector('#as_sel').value||null, b=d.querySelector('#as_save'); b.disabled=true;
     try{
       // Пачками по 50: адрес с сотней идентификаторов может не пройти через прокси
       for(let i=0;i<ids.length;i+=50)
         await db(`leads?id=in.(${ids.slice(i,i+50).join(',')})`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({owner_id:v})});
-      d.remove(); S.pick=null; toast(v?`Назначено: ${ids.length}`:`Сняты с ответственного: ${ids.length}`); go('list');
+      closeSheet(d); S.pick=null; toast(v?`Назначено: ${ids.length}`:`Сняты с ответственного: ${ids.length}`); go('list');
     }catch(e){ toast(e.message,true); b.disabled=false; }
   };
 }
@@ -2659,7 +2996,7 @@ async function loadReport(){
   });
   worked.sort((a,b)=> a.last<b.last ? 1 : a.last>b.last ? -1 : 0);
 
-  S.report={
+  return { report:{
     worked,
     // Имя автора нужно только в общекомандном отчёте: у менеджера все касания свои
     showAuthor: who==='all',
@@ -2680,7 +3017,7 @@ async function loadReport(){
     dmTouch, dmLeads, lostBy, cash, cashTotal, planLine, conv, demos,
     pipeline:leads.filter(l=>leadMine(l)&&stageOf(l.status)?.in_pipeline)
                   .reduce((s,l)=>s+(l.mrr_amount||0),0)
-  };
+  } };
 }
 
 function reportSVG(r){
@@ -3152,7 +3489,7 @@ function bind(){
   });
   document.querySelectorAll('[data-inv-del]').forEach(b=>b.onclick=async()=>{
     try{ await db(`invites?id=eq.${b.dataset.invDel}`,{method:'DELETE',prefer:'return=minimal'});
-      toast('Приглашение удалено'); go('team'); }catch(e){ toast(e.message,true); }
+      toast('Приглашение удалено'); refreshView(); }catch(e){ toast(e.message,true); }
   });
   const ivs=document.getElementById('iv_send');
   if(ivs) ivs.onclick=async()=>{
@@ -3166,7 +3503,7 @@ function bind(){
         {email, name, role:document.getElementById('iv_role').value, invited_by:S.prof.id})});
       const n=await rpc('apply_invites',{});
       toast(n>0 ? 'Аккаунт уже был: доступ выдан сразу' : 'Приглашение создано. Пусть регистрируется с этой почтой');
-      go('team');
+      refreshView();
     }catch(e){ toast(e.message.includes('duplicate')?'Открытое приглашение на эту почту уже есть':e.message,true); ivs.disabled=false; }
   };
 
@@ -3177,13 +3514,13 @@ function bind(){
     const role=document.getElementById('ps_role').value;
     if(S.person.id!==S.prof.id) patch.role=role;
     try{ await db(`profiles?id=eq.${S.person.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(patch)});
-      Object.assign(S.person, patch); toast('Сохранено'); go('person',false);
+      Object.assign(S.person, patch); toast('Сохранено'); refreshView();
     }catch(e){ toast(e.message,true); }
   };
   const toggleAccess=async(on)=>{
     if(!on && !confirm(`Отключить доступ: ${S.person.name}? История касаний останется.`)) return;
     try{ await db(`profiles?id=eq.${S.person.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({active:on})});
-      S.person.active=on; toast(on?'Доступ включён':'Доступ отключён'); go('person',false);
+      S.person.active=on; toast(on?'Доступ включён':'Доступ отключён'); refreshView();
     }catch(e){ toast(e.message,true); }
   };
   const pso=document.getElementById('ps_off'); if(pso) pso.onclick=()=>toggleAccess(false);
@@ -3196,13 +3533,13 @@ function bind(){
     for(const k of K){ const v=document.getElementById('pp_'+k).value.trim(); if(v==='') return toast('Заполни все семь цифр',true); body[k]=+v; }
     try{
       await db('plans?on_conflict=profile_id,month',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',body:JSON.stringify(body)});
-      toast('Личный план сохранён'); go('person',false);
+      toast('Личный план сохранён'); refreshView();
     }catch(e){ toast(e.message,true); }
   };
   const ppd=document.getElementById('pp_del');
   if(ppd) ppd.onclick=async()=>{
     try{ await db(`plans?profile_id=eq.${S.person.id}&month=eq.${monthKey()}`,{method:'DELETE',prefer:'return=minimal'});
-      toast('Личный план убран'); go('person',false); }catch(e){ toast(e.message,true); }
+      toast('Личный план убран'); refreshView(); }catch(e){ toast(e.message,true); }
   };
 
   document.querySelectorAll('[data-note]').forEach(b=>b.onclick=()=>noteSheet(b.dataset.note));
@@ -3277,7 +3614,7 @@ function bind(){
       try{
         await db('plan_defaults?id=eq.true',{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
         await db('ramp_steps?on_conflict=week',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',body:JSON.stringify(steps)});
-        toast('Нормы сохранены'); go('norms',false);
+        toast('Нормы сохранены'); refreshView();
       }catch(e){ toast(e.message,true); }
     };
   }
@@ -3330,25 +3667,34 @@ function bind(){
   const pkGo=document.getElementById('pk_go'); if(pkGo) pkGo.onclick=assignSheet;
 
   // Настройки
-  document.querySelectorAll('[data-mv]').forEach(b=>b.onclick=()=>{
-    const [k,c,dir]=b.dataset.mv.split(':'); moveDict(k,c,+dir); });
+  document.querySelectorAll('[data-sort]').forEach(box=>initSort(box, codes=>saveOrder(box.dataset.sort, codes)));
+  document.querySelectorAll('[data-title]').forEach(i=>{
+    const [k,c]=i.dataset.title.split(':');
+    i.onchange=()=>saveTitle(k,c,i);
+    i.onkeydown=e=>{ if(e.key==='Enter') i.blur(); };
+  });
   document.querySelectorAll('[data-dict]').forEach(b=>b.onclick=()=>{
     const [k,c]=b.dataset.dict.split(':'); dictSheet(k, DICT[k].list().find(x=>x.code===c)); });
   document.querySelectorAll('[data-dict-new]').forEach(b=>b.onclick=()=>dictSheet(b.dataset.dictNew, null));
-  document.querySelectorAll('[data-tb-on]').forEach(i=>i.onchange=()=>i.closest('.drow').classList.toggle('off',!i.checked));
-  const tfSave=document.getElementById('tf_save');
-  if(tfSave) tfSave.onclick=async()=>{
-    readTouchForm(); tfSave.disabled=true;
-    try{ await saveTouchForm(S.touchCfg); toast('Форма касания сохранена'); render(); }
-    catch(e){ toast(e.message,true); tfSave.disabled=false; }
-  };
+  document.querySelectorAll('[data-tb-on]').forEach(i=>i.onchange=()=>{ i.closest('.drow').classList.toggle('off',!i.checked); autosaveTouch(); });
+  document.querySelectorAll('[data-tb-title],#tf_days').forEach(i=>i.oninput=autosaveTouch);
+  const tfDay=document.getElementById('tf_day'); if(tfDay) tfDay.onchange=autosaveTouch;
   const tfReset=document.getElementById('tf_reset');
+  // Без подтверждения: прежняя форма возвращается кнопкой в сообщении
   if(tfReset) tfReset.onclick=async()=>{
-    if(!confirm('Вернуть форму касания к стандартной?')) return;
-    try{ await saveTouchForm(TOUCH_DEF); toast('Форма по умолчанию'); render(); }catch(e){ toast(e.message,true); }
+    const prev=JSON.parse(JSON.stringify(S.touchCfg));
+    try{ await saveTouchForm(TOUCH_DEF); render();
+      toast('Форма стандартная', false, {label:'Вернуть как было', ghost:true, fn:async()=>{ try{ await saveTouchForm(prev); render(); }catch(e){ toast(e.message,true); } }});
+    }catch(e){ toast(e.message,true); }
   };
 
   const touch=document.querySelector('[data-touch]'); if(touch) touch.onclick=touchSheet;
+  document.querySelectorAll('[data-draft-lead]').forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.draftLead; await openLead(id);
+    if(S.view==='lead' && S.lead?.id===id) touchSheet(); });
+  // Форма лида: черновик на телефоне, переход на другую вкладку ничего не стирает
+  const addForm=document.getElementById('addForm');
+  if(addForm && S.view==='add') S.addDraft=useDraft(addForm, 'lead:'+(S.editing?.id||'new'), {company:S.editing?.company_name||''});
   const lnote=document.querySelector('[data-note-lead]'); if(lnote) lnote.onclick=leadNoteSheet;
   const cold=document.getElementById('cold'); if(cold) cold.onclick=()=>{ cold.disabled=true; takeNextCold(); };
   const edit=document.querySelector('[data-edit]');
@@ -3357,16 +3703,17 @@ function bind(){
   if(del) del.onclick=async()=>{
     if(!confirm(`Удалить «${S.lead.company_name}» вместе со всей историей?`)) return;
     try{ await db(`companies?id=eq.${S.lead.company_id}`,{method:'DELETE',prefer:'return=minimal'});
-      S.lead=null; toast('Удалено'); go('list');
+      patchLeadEverywhere(S.lead.id, null, true); S.lead=null; toast('Удалено'); go('list');
     }catch(e){ toast(e.message,true); }
   };
 
   const save=document.getElementById('save'); if(save && S.view==='add') save.onclick=saveLead;
   const exp=document.getElementById('exp'); if(exp) exp.onclick=exportAll;
-  const rel=document.getElementById('reload'); if(rel) rel.onclick=()=>{ go(S.view); toast('Обновлено'); };
+  const rel=document.getElementById('reload'); if(rel) rel.onclick=async()=>{ CACHE.clear(); await refreshView(); toast('Обновлено'); };
   const out=document.getElementById('out');
   if(out && S.view==='more'){
-    out.onclick=()=>{ LS.del('sess'); LS.del('boot'); S.user=null; S.prof=null; render(); };
+    out.onclick=()=>{ LS.del('sess'); LS.del('boot'); LS.del('place'); LS.del('viewcache'); CACHE.clear();
+      draftList('').forEach(x=>draftDel(x.key)); S.user=null; S.prof=null; render(); };
     showVersion();
   }
 
@@ -3429,7 +3776,45 @@ function bind(){
 }
 
 /* ─────────── СТАРТ ─────────── */
-window.addEventListener('popstate', ()=>{ if(S.user && S.prof) popScreen(); });
+window.addEventListener('popstate', ()=>{
+  if(!(S.user && S.prof)) return;
+  // Открыт лист — «назад» закрывает его. Введённое остаётся черновиком.
+  if(SHEETS.length){ const top=SHEETS.at(-1), dirty=top.dirty(); closeSheet(top.d);
+    if(dirty){ render(); toast('Черновик сохранён'); } return; }
+  popScreen();
+});
+// Потянуть вниз от верха экрана — тихое обновление. Работает, когда лист не открыт.
+(function(){
+  let y0=null, pulled=0, el=null, busy=false;
+  const ui=()=>{ if(!el){ el=document.createElement('div'); el.className='ptr'; el.innerHTML='<i>↻</i>'; document.body.appendChild(el); } return el; };
+  window.addEventListener('touchstart', e=>{
+    y0 = (!busy && S.prof && !SHEETS.length && window.scrollY<=0 && e.touches.length===1) ? e.touches[0].clientY : null; pulled=0; }, {passive:true});
+  window.addEventListener('touchmove', e=>{
+    if(y0==null) return;
+    pulled=e.touches[0].clientY-y0;
+    if(pulled<=0 || window.scrollY>0){ y0=null; return; }
+    const k=Math.min(pulled,110), p=ui();
+    p.style.opacity=Math.min(1,k/70); p.style.transform=`translateY(${k*0.6-40}px) rotate(${k*3}deg)`;
+    p.classList.toggle('go', pulled>80);
+  }, {passive:true});
+  window.addEventListener('touchend', async()=>{
+    if(y0==null) return; y0=null;
+    const p=ui(); p.style.opacity=''; p.style.transform='';
+    if(pulled<=80){ p.classList.remove('go'); return; }
+    busy=true; p.classList.add('run');
+    try{ await flushQueue(); await refreshView(); }finally{ busy=false; p.classList.remove('run','go'); }
+  });
+})();
+
+// Вернулись в приложение после звонка или WhatsApp: тихо обновляем экран
+// и отправляем касания из очереди. Прокрутку запоминаем при уходе.
+let hiddenAt=0;
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='hidden'){ hiddenAt=Date.now(); rememberScroll(); savePlace(); persistCache(); return; }
+  if(!(S.user && S.prof) || Date.now()-hiddenAt<15000) return;
+  flushQueue();
+  if(!SHEETS.length && !typing()) refreshView();
+});
 
 if('serviceWorker' in navigator){
   window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
