@@ -754,7 +754,11 @@ async function fetchView(v){
   if(v==='settings'){
     const [tariffs, segments] = await Promise.all([db('tariffs?select=*&order=sort_order'),
       db('segments?select=*&order=sort_order,name'), loadDicts()]);
-    return { tariffs, segments };
+    // Справочники входят в данные экрана: иначе тихое обновление после «Сохранить»
+    // не видело разницы и не перерисовывало экран — новый этап появлялся только
+    // после перезапуска приложения
+    return { tariffs, segments, stages:S.stages, lostReasons:S.lostReasons,
+             touchCfg:S.touchCfg, dictsLive:S.dictsLive };
   }
   if(v==='learn') return loadLearn();
   if(v==='report') return loadReport();
@@ -815,6 +819,7 @@ const typing = () => { const a=document.activeElement;
   return a && a.id!=='q' && document.getElementById('app').contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName); };
 function applyPatch(key, patch){
   Object.assign(S, patch);
+  if('stages' in patch || 'lostReasons' in patch){ applyDicts(); saveBoot(); }
   if('data' in patch) S.dataKey = key;
 }
 
@@ -2485,6 +2490,14 @@ function initSort(box, done){
     h.onpointermove=move; h.onpointerup=h.onpointercancel=up;
   });
 }
+// Правка на месте (порядок, название, форма) — поправить и сохранённый экран
+// настроек, чтобы при следующем заходе не мелькнуло старое
+function syncSettingsCache(){
+  const c=CACHE.get('settings'); if(!c) return;
+  Object.assign(c, { tariffs:S.tariffs, segments:S.segments, stages:S.stages,
+    lostReasons:S.lostReasons, touchCfg:S.touchCfg });
+  clearTimeout(cacheSet.t); cacheSet.t=setTimeout(persistCache, 800);
+}
 async function saveOrder(kind, codes){
   if(kind==='block'){
     S.touchCfg.blocks=codes.map(id=>S.touchCfg.blocks.find(b=>b.id===id));
@@ -2494,7 +2507,7 @@ async function saveOrder(kind, codes){
   const changed=[];
   codes.forEach((c,k)=>{ const x=list.find(y=>y.code===c); if(x && x.sort_order!==(k+1)*10){ x.sort_order=(k+1)*10; changed.push(x); } });
   list.sort((a,b)=>a.sort_order-b.sort_order);
-  applyDicts(); saveBoot();
+  applyDicts(); saveBoot(); syncSettingsCache();
   try{
     await Promise.all(changed.map(x=>db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,
       {method:'PATCH',prefer:'return=minimal',body:JSON.stringify({sort_order:x.sort_order})})));
@@ -2506,7 +2519,7 @@ async function saveTitle(kind, code, input){
   const title=input.value.trim();
   if(!title){ input.value=x.title; return toast('Название не может быть пустым',true); }
   if(title===x.title) return;
-  const old=x.title; x.title=title; applyDicts(); saveBoot();
+  const old=x.title; x.title=title; applyDicts(); saveBoot(); syncSettingsCache();
   try{ await db(`${D.table}?code=eq.${encodeURIComponent(code)}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({title})});
     toast('Сохранено');
   }catch(e){ x.title=old; input.value=old; applyDicts(); toast(dictErr(e),true); }
@@ -2568,6 +2581,13 @@ function dictSheet(kind, x){
         // Код — служебный: латиница, по нему лид ссылается на справочник
         body.code=(kind==='tariff'?'t':kind==='stage'?'s':'r')+'_'+Date.now().toString(36);
         body.sort_order=Math.max(0,...D.list().map(y=>y.sort_order||0))+10;
+        // Новый этап встаёт перед «Клиентом», а не после «Отказа»: он открытый
+        if(kind==='stage'){
+          const won=D.list().find(y=>y.code==='won');
+          const open=D.list().filter(y=>!['won','lost'].includes(y.code)).map(y=>y.sort_order||0);
+          const mid=won ? Math.floor((Math.max(0,...open)+won.sort_order)/2) : null;
+          if(mid!=null && mid>Math.max(0,...open) && mid<won.sort_order) body.sort_order=mid;
+        }
         await db(D.table,{method:'POST',prefer:'return=minimal',body:JSON.stringify(body)});
       } else await db(`${D.table}?code=eq.${encodeURIComponent(x.code)}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify(body)});
       closeSheet(d); toast('Сохранено'); await reloadSettings();
@@ -2597,7 +2617,7 @@ function readTouchForm(){
 async function saveTouchForm(cfg){
   await db('app_settings?on_conflict=key',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',
     body:JSON.stringify({key:'touch_form', value:cfg})});
-  S.touchCfg=touchCfg(cfg); saveBoot();
+  S.touchCfg=touchCfg(cfg); saveBoot(); syncSettingsCache();
 }
 
 // Массовое назначение ответственного из списка
