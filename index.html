@@ -1175,7 +1175,7 @@ function bindLogin(){
       j.expires_at=Date.now()+(j.expires_in-60)*1000;
       LS.set('sess',j); await boot();
     }catch(e){
-      document.getElementById('er').textContent=e.message;
+      document.getElementById('er').textContent=authErr(e);
       go.disabled=false; go.textContent='Войти';
     }
   };
@@ -1190,9 +1190,22 @@ function bindLogin(){
     try{
       const j=await auth('signup',{email:em,password:pw});
       if(j.access_token){ j.expires_at=Date.now()+(j.expires_in-60)*1000; LS.set('sess',j); return boot(); }
-      er.textContent='Аккаунт создан. Подтверди почту по ссылке из письма и войди';
-    }catch(e){ er.textContent = /registered|exists/i.test(e.message) ? 'Такой аккаунт уже есть: просто войди' : e.message; }
+      // Сессии нет: в Supabase включено подтверждение почты. Письмо от встроенной
+      // почты Supabase до сотрудника обычно не доходит, ждать его бессмысленно.
+      er.textContent=UNCONFIRMED;
+    }catch(e){ er.textContent = /registered|exists/i.test(e.message) ? 'Такой аккаунт уже есть: просто войди' : authErr(e); }
   };
+}
+const UNCONFIRMED='Аккаунт есть, но Supabase ждёт подтверждения почты, а письмо может не прийти. '
+  +'Напиши администратору: пусть выполнит db/20_confirm_invited.sql. Потом войди этим паролем';
+// Ответы Supabase Auth приходят по-английски; частые — по-русски и с тем, что делать
+function authErr(e){
+  const m=e.message||'';
+  if(/not confirmed/i.test(m)) return UNCONFIRMED;
+  if(/invalid login|invalid_credentials/i.test(m)) return 'Неверная почта или пароль';
+  if(/rate limit/i.test(m)) return 'Supabase не отправил письмо: лимит писем. Администратору нужно выключить подтверждение почты в Supabase';
+  if(/signups? not allowed|disabled/i.test(m)) return 'Регистрация закрыта. Администратору нужно включить её в Supabase';
+  return m;
 }
 
 function noAccessScreen(){
