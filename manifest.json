@@ -1,6 +1,6 @@
 {
-  "name": "Balance CRM",
-  "short_name": "Balance",
+  "name": "Даима CRM",
+  "short_name": "Даима",
   "description": "Продажи ИИ-агентов: лиды, звонки, воронка",
   "start_url": "./",
   "scope": "./",

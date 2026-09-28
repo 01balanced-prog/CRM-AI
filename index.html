@@ -6,10 +6,10 @@
 <meta name="theme-color" content="#080808">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Balance">
+<meta name="apple-mobile-web-app-title" content="Даима">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-192.png">
-<title>Balance CRM</title>
+<title>Даима CRM</title>
 <style>
 /* ============ ТОКЕНЫ ============ */
 :root{
@@ -1137,7 +1137,7 @@ function render(){
 }
 
 function setupScreen(){
-  return `<div class="login"><div class="logo">balance<i>.</i></div>
+  return `<div class="login"><div class="logo">Да<i>и</i>ма</div>
   <p class="tag">Файл ещё не настроен</p>
   <div class="card"><p style="margin:0;font-size:14.5px;line-height:1.6">
   Открой <b>index.html</b> и замени два значения в самом верху блока
@@ -1149,7 +1149,7 @@ function setupScreen(){
 
 function loginScreen(){
   return `<div class="login">
-    <div class="logo">balance<i>.</i></div>
+    <div class="logo">Да<i>и</i>ма</div>
     <p class="tag">Вход для сотрудников</p>
     <label for="em">Почта</label>
     <input id="em" type="email" inputmode="email" autocomplete="username" autocapitalize="off">
@@ -1196,7 +1196,7 @@ function bindLogin(){
 }
 
 function noAccessScreen(){
-  return `<div class="login"><div class="logo">balance<i>.</i></div>
+  return `<div class="login"><div class="logo">Да<i>и</i>ма</div>
   <p class="tag">Доступ не выдан</p>
   <div class="card"><p style="margin:0;font-size:14.5px;line-height:1.6">
   Учётная запись есть, но она не привязана к сотруднику. Попроси администратора
@@ -1208,7 +1208,7 @@ function bindNoAccess(){
 }
 // Первый запуск без связи: кэша профиля ещё нет, показать нечего. Сессию не трогаем.
 function offlineScreen(){
-  return `<div class="login"><div class="logo">balance<i>.</i></div>
+  return `<div class="login"><div class="logo">Да<i>и</i>ма</div>
   <p class="tag">Нет связи</p>
   <div class="card"><p style="margin:0;font-size:14.5px;line-height:1.6">
   Не удалось загрузить данные. Проверь интернет и попробуй ещё раз.
@@ -2737,7 +2737,7 @@ function moreScreen(){
     ${isAdmin()?`<button class="btn ghost" id="exp">Выгрузить всё в Excel</button>`:''}
     <button class="btn ghost" id="reload">Обновить данные</button>
     <button class="btn warn" id="out">Выйти</button>
-    <p class="note">Balance CRM · данные хранятся в Supabase, доступ по ролям.
+    <p class="note">Даима CRM · данные хранятся в Supabase, доступ по ролям.
     Журнал касаний неизменяем.</p>
     <p class="note" id="ver"></p>
   </div>`;
@@ -2748,7 +2748,7 @@ async function showVersion(){
   const el=document.getElementById('ver'); if(!el) return;
   try{
     const t=await (await fetch('./sw.js',{cache:'no-store'})).text();
-    const m=t.match(/balance-crm-v(\d+)/);
+    const m=t.match(/crm-v(\d+)/);
     if(m) el.textContent=`Версия ${m[1]}`;
   }catch{}
 }
@@ -2803,12 +2803,12 @@ async function exportAll(){
       cts.map(c=>[c.companies?.name||'', c.name, c.position, c.phone_e164||c.phone_raw,
         c.is_decision_maker, c.is_primary]));
     const day=iso(new Date());
-    const files=[[`balance-leads-${day}.csv`,f1],[`balance-journal-${day}.csv`,f2],[`balance-contacts-${day}.csv`,f3]]
+    const files=[[`daima-leads-${day}.csv`,f1],[`daima-journal-${day}.csv`,f2],[`daima-contacts-${day}.csv`,f3]]
       .map(([n,t])=>new File([t], n, {type:'text/csv'}));
     // На телефоне отдаём через «Поделиться»: скрытая ссылка в приложении
     // с домашнего экрана может ничего не скачать. На компьютере обычное скачивание.
     if(navigator.canShare?.({files})){
-      await navigator.share({files, title:'Выгрузка Balance CRM'});
+      await navigator.share({files, title:'Выгрузка Даима CRM'});
     }else{
       for(const f of files){
         const a=document.createElement('a');
@@ -3264,8 +3264,8 @@ function reportDraw(r, wide){
   // шапка
   p.push(`<rect x="0" y="0" width="${W}" height="${Z.hd}" fill="${T.ink}"/>`);
   p.push(`<rect x="0" y="${Z.hd-4}" width="${W}" height="${wide?3:4}" fill="${T.acc}"/>`);
-  tx(P,wide?42:52,'balance',{s:Z.logo,w:700});
-  p.push(`<circle cx="${wide?P+102:150}" cy="${wide?37:46}" r="${wide?4:5}" fill="${T.acc}"/>`);
+  // Логотип: «и» акцентным цветом, как в фирменном знаке
+  p.push(`<text x="${P}" y="${wide?42:52}" fill="${T.txt}" font-family="${F}" font-size="${Z.logo}" font-weight="700">Да<tspan fill="${T.acc}">и</tspan>ма</text>`);
   tx(P,wide?64:82,`Отчёт ${per} · ${r.who}`,{s:Z.sub,c:T.mut});
   tx(W-P,wide?42:52,dt,{s:Z.sub,c:T.mut,a:'end'});
   let y = wide ? 100 : 144;
@@ -3426,7 +3426,7 @@ async function reportPNG(scale=2){
 }
 
 function reportName(){
-  return `balance-otchet-${S.period}-${iso(new Date())}.png`;
+  return `daima-otchet-${S.period}-${iso(new Date())}.png`;
 }
 
 /* ── НАВИГАЦИЯ ── */
@@ -3483,7 +3483,7 @@ function bind(){
   if(sht) sht.onclick=async()=>{
     const t=reportText(S.report);
     try{
-      if(navigator.share) await navigator.share({title:'Касания Balance', text:t});
+      if(navigator.share) await navigator.share({title:'Касания Даима', text:t});
       else { await navigator.clipboard.writeText(t); toast('Отправка недоступна — текст скопирован'); }
     }catch(e){ if(e.name!=='AbortError') toast(e.message,true); }
   };
@@ -3508,7 +3508,7 @@ function bind(){
       const blob=await reportPNG();
       const file=new File([blob], reportName(), {type:'image/png'});
       if(navigator.canShare?.({files:[file]})){
-        await navigator.share({files:[file], title:'Отчёт Balance'});
+        await navigator.share({files:[file], title:'Отчёт Даима'});
       }else{
         const a=document.createElement('a');
         a.href=URL.createObjectURL(blob); a.download=reportName(); a.click();
