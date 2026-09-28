@@ -274,6 +274,11 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
   white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 .tbl th{color:var(--muted);font-weight:600;background:var(--raised)}
 .note{font-size:13px;color:var(--dim);margin-top:8px;line-height:1.5}
+.pwd{font-family:var(--mono);font-size:34px;font-weight:600;letter-spacing:.12em;text-align:center;
+  padding:16px 0;margin:0 0 8px;background:var(--raised);border:1px solid var(--line);border-radius:var(--r);
+  user-select:all}
+.shr{white-space:pre-line;font-size:14px;line-height:1.5;color:var(--muted);background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin:8px 0 12px;user-select:all}
 
 /* ============ ПЛАН ============ */
 .plan h3 .sub2{display:block;margin-top:2px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim)}
@@ -585,6 +590,33 @@ async function db(path, opts={}){
 // Функция в базе: касание, лид с контактами — одной транзакцией
 function rpc(fn, args){
   return db(`rpc/${fn}`, { method:'POST', prefer:'return=representation', body:JSON.stringify(args) });
+}
+// Пароль от админа: восемь цифр, на телефоне набираются с цифровой раскладки
+function genPassword(){
+  const b=crypto.getRandomValues(new Uint32Array(2));
+  return String(b[0]%10000).padStart(4,'0')+String(b[1]%10000).padStart(4,'0');
+}
+const appUrl = () => location.origin+location.pathname;
+// Лист с текстом, который надо переслать человеку: пароль, приглашение.
+// Без name: пароль не должен пережить перезапуск приложения.
+function shareSheet(title, big, text, hint){
+  const d=document.createElement('div'); d.className='sheet';
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 10px;font-size:19px">${esc(title)}</h2>
+    ${big?`<div class="pwd">${esc(big)}</div>`:''}
+    <p class="note" style="margin:0 0 4px">${esc(hint)}</p>
+    <p class="shr">${esc(text)}</p>
+    <button class="btn" id="sh_send">Отправить</button>
+    <button class="btn ghost" id="sh_copy">Скопировать</button>
+    <button class="btn ghost" id="sh_done">Готово</button></div>`;
+  openSheet(d);
+  const copy=async()=>{ try{ await navigator.clipboard.writeText(text); toast('Скопировано'); }catch{ toast('Не скопировалось: выдели текст вручную',true); } };
+  d.querySelector('#sh_send').onclick=async()=>{
+    if(!navigator.share) return copy();
+    try{ await navigator.share({text}); }catch(e){ if(e.name!=='AbortError') copy(); }
+  };
+  d.querySelector('#sh_copy').onclick=copy;
+  d.querySelector('#sh_done').onclick=()=>closeSheet(d);
 }
 // Идентификатор касания: повтор «Сохранить» после обрыва связи не создаёт дубль
 function uuid(){
@@ -1157,58 +1189,64 @@ function loginScreen(){
     <input id="pw" type="password" autocomplete="current-password">
     <button class="btn" id="go">Войти</button>
     <p class="note" id="er"></p>
-    <button class="btn ghost" id="reg">Первый вход по приглашению</button>
-    <p class="note">Если администратор пригласил тебя по почте: впиши эту почту, придумай пароль
-    и нажми «Первый вход». Доступ появится сразу.</p>
+    <p class="note">Впервые? Впиши почту, на которую тебя пригласили, придумай пароль
+    и нажми «Войти».<br>Забыл пароль — администратор выдаст новый.</p>
   </div>`;
 }
 
+// Вход одной кнопкой. Пароль не подошёл, а на почту есть открытое приглашение —
+// значит, человек входит впервые: создаём аккаунт с этим паролем. Писем нет вообще:
+// почта Supabase до сотрудников не доходит, новый пароль выдаёт админ.
 function bindLogin(){
-  const go=document.getElementById('go');
+  const go=document.getElementById('go'), er=document.getElementById('er');
   const run=async()=>{
-    const em=document.getElementById('em').value.trim();
+    const em=document.getElementById('em').value.trim().toLowerCase();
     const pw=document.getElementById('pw').value;
-    if(!em||!pw) return document.getElementById('er').textContent='Заполни почту и пароль';
+    if(!em||!pw) return er.textContent='Заполни почту и пароль';
     go.disabled=true; go.textContent='Проверяю…';
     try{
-      const j=await auth('token?grant_type=password',{email:em,password:pw});
+      let j;
+      try{ j=await auth('token?grant_type=password',{email:em,password:pw}); }
+      catch(e){
+        if(!/invalid login|invalid_credentials/i.test(e.message)) throw e;
+        if(await inviteOpen(em)===false) throw new Error(WRONG);
+        if(pw.length<6) throw new Error('Придумай пароль не короче 6 символов');
+        try{ j=await auth('signup',{email:em,password:pw}); }
+        catch(e2){ throw /registered|exists/i.test(e2.message) ? new Error(WRONG) : e2; }
+        // Сессии нет: в Supabase включено подтверждение почты
+        if(!j.access_token) throw new Error(UNCONFIRMED);
+      }
       j.expires_at=Date.now()+(j.expires_in-60)*1000;
       LS.set('sess',j); await boot();
     }catch(e){
-      document.getElementById('er').textContent=authErr(e);
+      er.textContent=authErr(e);
       go.disabled=false; go.textContent='Войти';
     }
   };
   go.onclick=run;
   document.getElementById('pw').onkeydown=e=>{ if(e.key==='Enter') run(); };
-  document.getElementById('reg').onclick=async()=>{
-    const em=document.getElementById('em').value.trim();
-    const pw=document.getElementById('pw').value;
-    const er=document.getElementById('er');
-    if(!em||!pw) return er.textContent='Впиши почту из приглашения и придумай пароль';
-    if(pw.length<6) return er.textContent='Пароль не короче 6 символов';
-    try{
-      const j=await auth('signup',{email:em,password:pw});
-      if(j.access_token){ j.expires_at=Date.now()+(j.expires_in-60)*1000; LS.set('sess',j); return boot(); }
-      // Сессии нет: в Supabase включено подтверждение почты. Письмо от встроенной
-      // почты Supabase до сотрудника обычно не доходит, ждать его бессмысленно.
-      er.textContent=UNCONFIRMED;
-    }catch(e){ er.textContent = /registered|exists/i.test(e.message) ? EXISTS : authErr(e); }
-  };
 }
-const UNCONFIRMED='Аккаунт есть, но Supabase ждёт подтверждения почты, а письмо может не прийти. '
-  +'Напиши администратору: пусть выполнит db/20_confirm_invited.sql. Потом войди этим паролем';
-// Повторный «Первый вход» пароль не меняет: аккаунт создан первой попыткой, с её паролем
-const EXISTS='Аккаунт на эту почту уже создан, с паролем из первой попытки. Войди им. '
-  +'Не помнишь — попроси администратора сбросить пароль';
+// Есть ли открытое приглашение. Входа ещё нет, поэтому запрос от роли anon.
+// null — функции нет в базе (db/21 не применён): пробуем регистрацию, как раньше.
+async function inviteOpen(email){
+  const r=await fetch(`${API}/rest/v1/rpc/invite_open`,{method:'POST',
+    headers:{'apikey':SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({p_email:email})});
+  if(r.status===404) return null;
+  if(!r.ok) throw new Error(`Ошибка ${r.status}`);
+  return (await r.json())===true;
+}
+const WRONG='Неверная почта или пароль. Забыл пароль — попроси администратора выдать новый';
+const UNCONFIRMED='Supabase ждёт подтверждения почты, а письмо не придёт. '
+  +'Попроси администратора выдать тебе пароль в карточке сотрудника: это подтвердит почту';
 // Ответы Supabase Auth приходят по-английски; частые — по-русски и с тем, что делать
 function authErr(e){
   const m=e.message||'';
   if(/not confirmed/i.test(m)) return UNCONFIRMED;
-  if(/invalid login|invalid_credentials/i.test(m)) return 'Неверная почта или пароль. '
-    +'Если уже нажимал «Первый вход», пароль тот, что ввёл в первый раз, а не новый';
-  if(/rate limit/i.test(m)) return 'Supabase не отправил письмо: лимит писем. Администратору нужно выключить подтверждение почты в Supabase';
+  if(/invalid login|invalid_credentials/i.test(m)) return WRONG;
+  if(/at least 6|weak_password/i.test(m)) return 'Пароль не короче 6 символов';
+  if(/rate limit/i.test(m)) return 'Слишком много попыток. Подожди пару минут';
   if(/signups? not allowed|disabled/i.test(m)) return 'Регистрация закрыта. Администратору нужно включить её в Supabase';
+  if(/failed to fetch|network/i.test(m)) return 'Нет связи. Проверь интернет';
   return m;
 }
 
@@ -2351,8 +2389,8 @@ function teamScreen(){
     <label for="iv_role">Роль</label>
     <select id="iv_role"><option value="manager">Менеджер</option><option value="admin">Администратор</option></select>
     <button class="btn ghost" id="iv_send" style="margin-top:12px">Пригласить</button>
-    <p class="note">Человек регистрируется на экране входа с этой почтой и сразу получает доступ.
-    Если аккаунт уже заведён в Supabase, доступ выдаётся сразу.</p>
+    <p class="note">После «Пригласить» появится готовый текст со ссылкой: отправь его человеку.
+    Он впишет эту почту, придумает пароль и нажмёт «Войти».</p>
   </div>`;
   const links=`<div class="card">
     <button class="link" data-nav="settings"><span>Настройки<span class="cnt" style="margin-left:8px">воронка, отказы, тарифы, форма касания</span></span></button>
@@ -2396,6 +2434,7 @@ function personScreen(){
     <select id="ps_role" ${me?'disabled':''}><option value="manager" ${p.role==='manager'?'selected':''}>Менеджер</option>
       <option value="admin" ${p.role==='admin'?'selected':''}>Администратор</option></select>
     <button class="btn ghost" id="ps_save" style="margin-top:12px">Сохранить</button>
+    ${p.active?`<button class="btn ghost" id="ps_pwd">${me?'Сменить свой пароль':'Выдать новый пароль'}</button>`:''}
     ${me?'':p.active?`<button class="btn warn" id="ps_off">Отключить доступ</button>`
                     :`<button class="btn" id="ps_on">Включить доступ</button>`}
   </div>`;
@@ -3555,7 +3594,10 @@ function bind(){
       await db('invites',{method:'POST',prefer:'return=minimal',body:JSON.stringify(
         {email, name, role:document.getElementById('iv_role').value, invited_by:S.prof.id})});
       const n=await rpc('apply_invites',{});
-      toast(n>0 ? 'Аккаунт уже был: доступ выдан сразу' : 'Приглашение создано. Пусть регистрируется с этой почтой');
+      if(n>0) toast('Аккаунт уже был: доступ выдан. Пароль можно выдать в карточке');
+      else shareSheet('Приглашение создано', '',
+        `${name}, тебя пригласили в Balance CRM.\nОткрой ${appUrl()}\nВпиши почту ${email}, придумай пароль и нажми «Войти».`,
+        'Отправь это человеку. Первый вход создаст ему аккаунт с тем паролем, который он придумает.');
       refreshView();
     }catch(e){ toast(e.message.includes('duplicate')?'Открытое приглашение на эту почту уже есть':e.message,true); ivs.disabled=false; }
   };
@@ -3575,6 +3617,20 @@ function bind(){
     try{ await db(`profiles?id=eq.${S.person.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({active:on})});
       S.person.active=on; toast(on?'Доступ включён':'Доступ отключён'); refreshView();
     }catch(e){ toast(e.message,true); }
+  };
+  // Письма не доходят, поэтому «забыл пароль» решает админ: новый пароль сразу на экране
+  const psp=document.getElementById('ps_pwd');
+  if(psp) psp.onclick=async()=>{
+    const me=S.person.id===S.prof.id;
+    if(!me && !confirm(`Выдать новый пароль: ${S.person.name}? Старый перестанет подходить.`)) return;
+    const pw=genPassword(); psp.disabled=true;
+    try{
+      const em=await rpc('set_staff_password',{p_id:S.person.id, p_password:pw});
+      shareSheet(me?'Твой новый пароль':'Новый пароль', pw,
+        `Вход в Balance CRM: ${appUrl()}\nПочта: ${em}\nПароль: ${pw}`,
+        me?'Запиши его. В этом браузере ты остаёшься в системе.':'Отправь это сотруднику: почта, пароль и ссылка уже в тексте.');
+    }catch(e){ toast(/set_staff_password|404|PGRST202/.test(e.message)?'Сначала выполни в Supabase db/21_simple_login.sql':e.message,true); }
+    psp.disabled=false;
   };
   const pso=document.getElementById('ps_off'); if(pso) pso.onclick=()=>toggleAccess(false);
   const psn=document.getElementById('ps_on');  if(psn) psn.onclick=()=>toggleAccess(true);
