@@ -1193,16 +1193,20 @@ function bindLogin(){
       // Сессии нет: в Supabase включено подтверждение почты. Письмо от встроенной
       // почты Supabase до сотрудника обычно не доходит, ждать его бессмысленно.
       er.textContent=UNCONFIRMED;
-    }catch(e){ er.textContent = /registered|exists/i.test(e.message) ? 'Такой аккаунт уже есть: просто войди' : authErr(e); }
+    }catch(e){ er.textContent = /registered|exists/i.test(e.message) ? EXISTS : authErr(e); }
   };
 }
 const UNCONFIRMED='Аккаунт есть, но Supabase ждёт подтверждения почты, а письмо может не прийти. '
   +'Напиши администратору: пусть выполнит db/20_confirm_invited.sql. Потом войди этим паролем';
+// Повторный «Первый вход» пароль не меняет: аккаунт создан первой попыткой, с её паролем
+const EXISTS='Аккаунт на эту почту уже создан, с паролем из первой попытки. Войди им. '
+  +'Не помнишь — попроси администратора сбросить пароль';
 // Ответы Supabase Auth приходят по-английски; частые — по-русски и с тем, что делать
 function authErr(e){
   const m=e.message||'';
   if(/not confirmed/i.test(m)) return UNCONFIRMED;
-  if(/invalid login|invalid_credentials/i.test(m)) return 'Неверная почта или пароль';
+  if(/invalid login|invalid_credentials/i.test(m)) return 'Неверная почта или пароль. '
+    +'Если уже нажимал «Первый вход», пароль тот, что ввёл в первый раз, а не новый';
   if(/rate limit/i.test(m)) return 'Supabase не отправил письмо: лимит писем. Администратору нужно выключить подтверждение почты в Supabase';
   if(/signups? not allowed|disabled/i.test(m)) return 'Регистрация закрыта. Администратору нужно включить её в Supabase';
   return m;
