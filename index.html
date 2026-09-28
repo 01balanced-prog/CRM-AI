@@ -407,15 +407,33 @@ const STAGES_DEF = Object.entries(STATUS).map(([code,title],i)=>({ code, title, 
     proposal_sent:'after_proposal', negotiation:'closing', won:'closing' }[code]||null }));
 const LOST_DEF = Object.entries(LOST).map(([code,title],i)=>({code, title, sort_order:(i+1)*10, active:true, system:true}));
 // Форма касания: какие блоки показывать, в каком порядке и как подписать. Настраивает админ.
-const TOUCH_BLOCKS = { outcome:'Чем закончилось', level:'Говорил с', stage:'Что произошло',
+const TOUCH_BLOCKS = { channel:'Как связался', outcome:'Чем закончилось', level:'Говорил с', stage:'Что произошло',
   contact:'Узнал контакт: имя, должность, телефон', demo:'Отправил демо', next:'Когда следующий шаг',
-  comment:'Комментарий', details:'Подробнее: канал, тариф, текст шага' };
-const TOUCH_DEF = { blocks:['outcome','level','stage','contact','demo','next','comment','details']
+  comment:'Комментарий', details:'Подробнее: тариф, текст шага' };
+const TOUCH_DEF = { blocks:['channel','outcome','level','stage','contact','demo','next','comment','details']
   .map(id=>({id, on:id!=='demo', title:''})), days:[0,1,3,7,14,30], day:1 };
+// Каналы связи — справочник channels (db/19_metrics.sql), здесь значения по умолчанию.
+// Вид канала решает, какие исходы есть в касании: у переписки «Без ответа»
+// вместо «Не взял», у встречи недозвона не бывает. Звонок один: по нему норма.
+// other (заметка) и system (журнал) — служебные, в выборе их нет.
 const CHAN = { call:'Звонок', whatsapp:'WhatsApp', instagram:'Instagram',
-  meeting:'Встреча', other:'Другое', system:'Система' };
+  meeting:'Встреча', other:'Заметка', system:'Система' };
+const CHAN_KIND = { call:'call', whatsapp:'message', instagram:'message', meeting:'meeting',
+  other:'service', system:'service' };
+const CHANNELS_DEF = Object.entries(CHAN).map(([code,title],i)=>({ code, title,
+  sort_order:(i+1)*10, active:true, system:true, kind:CHAN_KIND[code] }));
+const KIND = { call:'звонок', message:'переписка', meeting:'встреча' };
 const OUT = { answered:'Ответил', no_answer:'Не взял', callback:'Просил перезвонить',
   refused:'Отказ', sent:'Отправлено', other:'Другое' };
+// Подпись исхода зависит от вида канала: «Ответил» на встрече звучит странно
+const OUT_BY_KIND = {
+  message:{ no_answer:'Без ответа', sent:'Без ответа', callback:'Попросил позже' },
+  meeting:{ answered:'Состоялась', callback:'Перенесли' } };
+const outLabel = (kind, k) => OUT_BY_KIND[kind]?.[k] || OUT[k] || k || '';
+// Исходы по видам канала. Без ответа в переписке уходит в базу как sent:
+// недозвоны считаются в план и закрывают лид после пяти подряд.
+const OUT_KEYS = { call:['answered','no_answer','callback','refused'],
+  message:['answered','no_answer','callback','refused'], meeting:['answered','callback','refused'] };
 
 const IC = {
   phone:'<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.4-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>',
@@ -430,6 +448,7 @@ const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
             plan:null, streak:0, team:[], person:null, invites:[], defaults:null, ramp:[],
             scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null, segments:[],
             stages:STAGES_DEF, lostReasons:LOST_DEF, touchCfg:TOUCH_DEF, dictsLive:false,
+            channels:CHANNELS_DEF, chanLive:false,
             pick:null, qFocus:false };
 
 // Справочники из базы раскладываем по привычным объектам STATUS и LOST:
@@ -441,14 +460,24 @@ function applyDicts(){
   S.stages.forEach(s=>STATUS[s.code]=s.title);
   for(const k of Object.keys(LOST)) delete LOST[k];
   S.lostReasons.forEach(r=>LOST[r.code]=r.title);
+  S.channels=[...S.channels].sort(byOrder);
+  for(const k of Object.keys(CHAN)) delete CHAN[k];
+  for(const k of Object.keys(CHAN_KIND)) delete CHAN_KIND[k];
+  S.channels.forEach(c=>{ CHAN[c.code]=c.title; CHAN_KIND[c.code]=c.kind; });
 }
 // Настройки формы касания поверх значений по умолчанию: новый блок из будущей
-// версии появится включённым, неизвестный из старой пропадёт.
+// версии появится включённым, неизвестный из старой пропадёт. Новый блок встаёт
+// на своё место по умолчанию (перед тем, за кем он стоит в стандартной форме),
+// а не в конец: «Как связался» должен быть сверху, а не под «Подробнее».
 function touchCfg(raw){
   const c=raw&&typeof raw==='object'?raw:{};
   const saved=(Array.isArray(c.blocks)?c.blocks:[]).filter(b=>b&&TOUCH_BLOCKS[b.id]);
-  const blocks=[...saved.map(b=>({id:b.id, on:b.on!==false, title:String(b.title||'')})),
-    ...TOUCH_DEF.blocks.filter(d=>!saved.some(b=>b.id===d.id))];
+  const blocks=saved.map(b=>({id:b.id, on:b.on!==false, title:String(b.title||'')}));
+  TOUCH_DEF.blocks.forEach((d,i)=>{
+    if(blocks.some(b=>b.id===d.id)) return;
+    const after=TOUCH_DEF.blocks.slice(i+1).map(x=>blocks.findIndex(b=>b.id===x.id)).find(k=>k>=0);
+    blocks.splice(after==null?blocks.length:after, 0, {...d});
+  });
   const days=(Array.isArray(c.days)?c.days:TOUCH_DEF.days).map(Number)
     .filter(n=>Number.isInteger(n)&&n>=0&&n<=365);
   const uniq=[...new Set(days.length?days:TOUCH_DEF.days)].sort((a,b)=>a-b);
@@ -457,17 +486,25 @@ function touchCfg(raw){
 // Таблиц ещё нет (миграция 18 не выполнена) — молча остаёмся на значениях по умолчанию
 async function loadDicts(){
   const safe=p=>db(p).catch(e=>{ if(isOffline(e)||e.auth) throw e; return null; });
-  const [st, lr, cfg] = await Promise.all([
+  const [st, lr, cfg, ch] = await Promise.all([
     safe('stages?select=*&order=sort_order,title'),
     safe('lost_reasons?select=*&order=sort_order,title'),
-    safe('app_settings?key=eq.touch_form&select=value') ]);
+    safe('app_settings?key=eq.touch_form&select=value'),
+    safe('channels?select=*&order=sort_order,title') ]);
   S.dictsLive = !!st;
+  S.chanLive = !!ch;
   S.stages = st?.length ? st : STAGES_DEF;
   S.lostReasons = lr?.length ? lr : LOST_DEF;
+  S.channels = ch?.length ? ch : CHANNELS_DEF;
   S.touchCfg = touchCfg(cfg?.[0]?.value);
   applyDicts();
 }
 const stageOf = code => S.stages.find(s=>s.code===code);
+// Каналы, которые предлагаются в касании: включённые и не служебные
+const touchChannels = () => S.channels.filter(c=>c.active && c.kind!=='service');
+const chanKind = code => CHAN_KIND[code] || 'message';
+// Шаг воронки: без миграции 19 колонки нет — тогда шаги все открытые этапы
+const inFunnel = s => !['new','no_answer','lost'].includes(s.code) && s.in_funnel!==false;
 const tBlock = id => S.touchCfg.blocks.find(b=>b.id===id) || {id,on:true,title:''};
 const tTitle = id => tBlock(id).title || TOUCH_BLOCKS[id];
 
@@ -711,6 +748,7 @@ async function boot(){
       S.prof=cached.prof; S.tariffs=cached.tariffs||[]; S.staff=cached.staff||[]; S.segments=cached.segments||[]; S.offline=true;
       if(cached.stages?.length) S.stages=cached.stages;
       if(cached.lostReasons?.length) S.lostReasons=cached.lostReasons;
+      if(cached.channels?.length) S.channels=cached.channels;
       S.touchCfg=touchCfg(cached.touchCfg); applyDicts();
       // Без связи показываем сохранённый экран «Сегодня», а не пустоту
       restoreCache(); const t0=CACHE.get('today'); if(t0){ applyPatch('today', t0); S.curKey='today'; }
@@ -723,7 +761,7 @@ async function boot(){
 
 function saveBoot(){
   LS.set('boot', {prof:S.prof, tariffs:S.tariffs, staff:S.staff, segments:S.segments,
-    stages:S.stages, lostReasons:S.lostReasons, touchCfg:S.touchCfg});
+    stages:S.stages, lostReasons:S.lostReasons, touchCfg:S.touchCfg, channels:S.channels});
 }
 
 // Данные экрана одним объектом, без записи в S: пока ответ идёт, человек может уйти
@@ -758,7 +796,7 @@ async function fetchView(v){
     // не видело разницы и не перерисовывало экран — новый этап появлялся только
     // после перезапуска приложения
     return { tariffs, segments, stages:S.stages, lostReasons:S.lostReasons,
-             touchCfg:S.touchCfg, dictsLive:S.dictsLive };
+             touchCfg:S.touchCfg, dictsLive:S.dictsLive, channels:S.channels, chanLive:S.chanLive };
   }
   if(v==='learn') return loadLearn();
   if(v==='report') return loadReport();
@@ -819,7 +857,7 @@ const typing = () => { const a=document.activeElement;
   return a && a.id!=='q' && document.getElementById('app').contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName); };
 function applyPatch(key, patch){
   Object.assign(S, patch);
-  if('stages' in patch || 'lostReasons' in patch){ applyDicts(); saveBoot(); }
+  if('stages' in patch || 'lostReasons' in patch || 'channels' in patch){ applyDicts(); saveBoot(); }
   if('data' in patch) S.dataKey = key;
 }
 
@@ -1324,11 +1362,11 @@ function leadScreen(){
       l.lost_reason?' · '+LOST[l.lost_reason]:''}${l.level?' · '+LEVEL[l.level]:''}</span></h1></div>`;
 
   const acts=`<div class="actions">
-    <a class="act primary" ${l.primary_phone?`href="tel:${l.primary_phone}"`:'disabled'}>
+    <a class="act primary" data-reach="call" ${l.primary_phone?`href="tel:${l.primary_phone}"`:'disabled'}>
       <span class="ic">${IC.phone}</span>Позвонить</a>
-    <a class="act" ${wa?`href="${wa}" target="_blank" rel="noopener"`:'disabled'}>
+    <a class="act" data-reach="whatsapp" ${wa?`href="${wa}" target="_blank" rel="noopener"`:'disabled'}>
       <span class="ic">${IC.chat}</span>WhatsApp</a>
-    <a class="act" ${l.instagram_url?`href="${esc(l.instagram_url)}" target="_blank" rel="noopener"`:'disabled'}>
+    <a class="act" data-reach="instagram" ${l.instagram_url?`href="${esc(l.instagram_url)}" target="_blank" rel="noopener"`:'disabled'}>
       <span class="ic">${IC.cam}</span>Instagram</a>
     <a class="act" ${l.gis_url?`href="${esc(l.gis_url)}" target="_blank" rel="noopener"`:'disabled'}>
       <span class="ic">${IC.pin}</span>${l.gis_url && !/\/firm\//.test(l.gis_url) ? '2ГИС поиск' : '2ГИС'}</a>
@@ -1344,8 +1382,8 @@ function leadScreen(){
         .filter(Boolean).map(esc).join(' · ') || 'должность не указана'}</span>
       ${c.phone_e164?`<i>${fmtPhone(c.phone_e164)}</i>`:'<i class="no">телефона нет</i>'}
     </button>
-    ${c.phone_e164?`<a class="ct-btn" href="tel:${c.phone_e164}" aria-label="Позвонить">${IC.phone}</a>
-    <a class="ct-btn" href="${wa2(c.phone_e164)}" target="_blank" rel="noopener" aria-label="WhatsApp">${IC.chat}</a>`:''}
+    ${c.phone_e164?`<a class="ct-btn" data-reach="call" href="tel:${c.phone_e164}" aria-label="Позвонить">${IC.phone}</a>
+    <a class="ct-btn" data-reach="whatsapp" href="${wa2(c.phone_e164)}" target="_blank" rel="noopener" aria-label="WhatsApp">${IC.chat}</a>`:''}
   </div>`;
 
   const dm = `<div class="card">
@@ -1422,7 +1460,7 @@ function leadScreen(){
   // Главное действие закреплено над навигацией, чтобы не листать карточку после звонка
   const dock=`<div class="dock three">
     ${l.primary_phone
-      ? `<a class="dcall" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`
+      ? `<a class="dcall" data-reach="call" href="tel:${l.primary_phone}" aria-label="Позвонить">${IC.phone}</a>`
       : `<span class="dcall" disabled>${IC.phone}</span>`}
     <button class="dscript" data-script>Скрипт</button>
     <button class="btn" data-touch>${draftGet('touch:'+l.id)?'Дописать касание':'Записать касание'}</button>
@@ -1434,7 +1472,7 @@ function leadScreen(){
 // Заголовок касания в журнале: заметка без звонка так и называется
 function touchTitle(a){
   if(a.channel==='other' && a.outcome==='other') return /^Отложен/.test(a.comment||'') ? 'Отложен' : 'Заметка';
-  return `${CHAN[a.channel]||a.channel} · ${OUT[a.outcome]||''}${a.spoke_with?' · '+LEVEL[a.spoke_with]:''}${a.demo?' · '+DEMO[a.demo].toLowerCase():''}`;
+  return `${CHAN[a.channel]||a.channel} · ${outLabel(chanKind(a.channel), a.outcome)}${a.spoke_with?' · '+LEVEL[a.spoke_with]:''}${a.demo?' · '+DEMO[a.demo].toLowerCase():''}`;
 }
 function ev(a){
   const cls = a.outcome==='answered'?'ok' : (a.outcome==='no_answer'||a.outcome==='refused')?'bad':'';
@@ -1470,11 +1508,21 @@ function touchSheet(){
   const lostList=S.lostReasons.filter(r=>r.active||r.code===l.lost_reason);
   const tariffs=S.tariffs.filter(t=>t.active!==false||t.code===l.tariff);
   const day0=cfg.day;
+  // Канал: включённые в «Настройках». Если человек только что нажал в карточке
+  // «Позвонить» или «WhatsApp», этот канал и выбран: телефон мог выгрузить
+  // приложение на время разговора, поэтому метка лежит в localStorage.
+  const chans=touchChannels().length ? touchChannels() : CHANNELS_DEF.filter(c=>c.code==='call');
+  const reach=LS.get('reach');
+  const ch0 = reach && reach.lead===l.id && Date.now()-reach.at<3*3600e3 && chans.some(c=>c.code===reach.ch)
+    ? reach.ch : chans[0].code;
   // Каждый блок — свой кусок разметки. Выключенный админом блок остаётся в листе
   // скрытым: значение по умолчанию у него есть, логика листа не ломается.
   const B={
+    channel:`<label>${esc(tTitle('channel'))}</label>
+      <div class="chips" id="ch">${chans.map(c=>
+        `<button class="chip ${c.code===ch0?'on':''}" data-v="${esc(c.code)}">${esc(c.title)}</button>`).join('')}</div>`,
     outcome:`<label>${esc(tTitle('outcome'))}</label>
-      <div class="chips" id="oc">${['answered','no_answer','callback','refused'].map((k,i)=>
+      <div class="chips" id="oc">${OUT_KEYS.call.map((k,i)=>
         `<button class="chip ${i===0?'on':''}" data-v="${k}">${OUT[k]}</button>`).join('')}</div>`,
     level:`<div id="swBox"><label>${esc(tTitle('level'))}</label>
       <div class="chips" id="sw">${Object.entries(LEVEL).map(([k,v])=>`<button class="chip" data-v="${k}" type="button">${v}${k===(l.level||'')&&l.dm_name&&['manager','owner'].includes(k)?` · ${esc(l.dm_name)}`:''}</button>`).join('')}</div></div>`,
@@ -1503,9 +1551,6 @@ function touchSheet(){
       <textarea id="cm" placeholder="Что сказали. Можно надиктовать голосом"></textarea>`,
     details:`<button class="more" id="moreBtn" type="button">${esc(tTitle('details'))}</button>
       <div id="details" hidden>
-        <label>Канал</label>
-        <div class="chips" id="ch">${['call','whatsapp','instagram','meeting'].map((k,i)=>
-          `<button class="chip ${i===0?'on':''}" data-v="${k}">${CHAN[k]}</button>`).join('')}</div>
         <label for="na">Что сделать следующим шагом</label>
         <input type="text" id="na" placeholder="Перезвонить, уточнить решение" value="${esc(l.next_action||'')}">
         <label>Тариф</label>
@@ -1567,11 +1612,18 @@ function touchSheet(){
     if(o==='refused') stVal='lost';
     setSt(stVal);
   }
-  // Исход описывает разговор, отправка описывается чипами демо. Для мессенджера
-  // «Не взял» звучит как «Без ответа» и уходит в базу исходом sent, а не недозвоном:
-  // недозвоны считаются в план и закрывают лид после пяти подряд.
-  const isMsg=()=>['whatsapp','instagram'].includes(gv('ch'));
-  const relabel=()=>{ $('oc').querySelector('[data-v="no_answer"]').textContent = isMsg() ? 'Без ответа' : OUT.no_answer; };
+  // Исход описывает разговор, отправка описывается чипами демо. Подписи и набор
+  // исходов зависят от вида канала: в переписке «Не взял» звучит как «Без ответа»
+  // и уходит в базу исходом sent, а не недозвоном — недозвоны считаются в план
+  // и закрывают лид после пяти подряд. У встречи недозвона нет вовсе.
+  const kind=()=>chanKind(gv('ch'));
+  const isMsg=()=>kind()==='message';
+  const relabel=()=>{
+    const k=kind(), keys=OUT_KEYS[k]||OUT_KEYS.call;
+    $('oc').querySelectorAll('.chip').forEach(c=>{ c.textContent=outLabel(k, c.dataset.v); c.hidden=!keys.includes(c.dataset.v); });
+    const on=$('oc').querySelector('.chip.on');
+    if(on && on.hidden){ on.classList.remove('on'); $('oc').querySelector('[data-v="answered"]').classList.add('on'); autoStatus('answered'); }
+  };
   d.querySelectorAll('#stc .chip').forEach(b=>b.onclick=()=>setSt(b.dataset.s));
   ['oc','dt','ch','demo'].forEach(id=>{ const w=$(id);
     w.onclick=e=>{ const b=e.target.closest('[data-v],[data-d]'); if(!b) return;
@@ -1583,6 +1635,7 @@ function touchSheet(){
       if(id==='demo' && b.dataset.v && ['new','no_answer','contacted'].includes(stVal)) setSt('brief_done');
     }; });
   autoStatus('answered'); // исход по умолчанию тоже подчиняется правилу, а не только нажатие
+  relabel();
   dr=useDraft(d, 'touch:'+l.id, {lead:l.id, company:l.company_name, clientId},
     { extra:()=>({st:stVal}), onRestore:v=>{ if(v.s.x?.st) stVal=v.s.x.st; relabel(); setSt(stVal); } });
 
@@ -1627,7 +1680,7 @@ function touchSheet(){
                           phone:nc.phone, phone_raw:nc.raw||null, dm:nc.dm} : null,
         script_id:S.callScript?.script_id||null, objection_id:S.callScript?.objection_id||null,
         demo: gv('demo')||null });
-      dr.clear(); closeSheet(d); S.callScript=null;
+      dr.clear(); closeSheet(d); S.callScript=null; LS.del('reach');
       patchLeadEverywhere(l.id, {status:r?.status||status, next_action_at:patch.next_action_at, next_action:patch.next_action});
       await openLead(l.id, false);
       if(r?.auto_closed) toast('Записано. Пять недозвонов подряд — лид закрыт',
@@ -1636,7 +1689,7 @@ function touchSheet(){
     }catch(e){
       if(isOffline(e)){
         queueAdd({args:lastTouchArgs});
-        dr.clear(); closeSheet(d); toast('Нет связи. Касание сохранено на телефоне, отправлю, как появится сеть');
+        dr.clear(); closeSheet(d); LS.del('reach'); toast('Нет связи. Касание сохранено на телефоне, отправлю, как появится сеть');
         render(); return;
       }
       toast(e.message,true); btn.disabled=false; btn.textContent='Сохранить';
@@ -2389,9 +2442,12 @@ function settingsScreen(){
   const head=`<div class="topbar"><button class="back" data-back>‹</button>
     <h1>Настройки<span class="sub">воронка, отказы, тарифы, форма касания</span></h1></div>`;
   if(S.busy) return head+`<div class="spin"></div>`;
-  const warn = S.dictsLive ? '' : `<div class="notice"><span><b>Нужна миграция.</b> Выполни
-    <span style="font-family:var(--mono)">db/18_settings.sql</span> в Supabase: пока её нет,
-    этапы, причины отказа и форма касания показаны по умолчанию и не сохраняются.</span></div>`;
+  const warn = !S.dictsLive ? `<div class="notice"><span><b>Нужна миграция.</b> Выполни
+    <span style="font-family:var(--mono)">db/18_settings.sql</span> и <span style="font-family:var(--mono)">db/19_metrics.sql</span> в Supabase: пока их нет,
+    этапы, причины отказа, каналы и форма касания показаны по умолчанию и не сохраняются.</span></div>`
+    : !S.chanLive ? `<div class="notice"><span><b>Нужна миграция.</b> Выполни
+    <span style="font-family:var(--mono)">db/19_metrics.sql</span> в Supabase: пока её нет,
+    каналы связи и шаги воронки показаны по умолчанию и не сохраняются.</span></div>` : '';
   // Строка справочника: ручка ≡ для перетаскивания, название правится прямо здесь,
   // ⋯ открывает остальное (видимость, скрипт этапа, цены)
   const drow=(kind,x,meta)=>`<div class="drow ${x.active===false?'off':''}" data-code="${esc(x.code)}">
@@ -2403,7 +2459,10 @@ function settingsScreen(){
 
   const stages=list('stage', S.stages.map(s=>drow('stage',s,[
     s.active?'':'выключен', FIXED_ST.includes(s.code)?'нужен базе':s.system?'':'свой',
+    ['new','no_answer','won','lost'].includes(s.code)?'':inFunnel(s)?'':'вне конверсии',
     s.in_pipeline?'в MRR':'', s.script_stage?'скрипт: '+STAGE[s.script_stage]:''])).join(''));
+  const chans=list('chan', S.channels.filter(c=>c.kind!=='service').map(c=>drow('chan',c,[
+    c.active?'':'выключен', KIND[c.kind], c.system?'':'свой'])).join(''));
   const reasons=list('lost', S.lostReasons.map(r=>drow('lost',r,[
     r.active?'':'выключена', r.code==='unreachable'?'ставит база после 5 недозвонов':r.system?'':'своя'])).join(''));
   const tariffs=list('tariff', S.tariffs.map(t=>drow('tariff',t,[
@@ -2419,18 +2478,26 @@ function settingsScreen(){
   return head+`<div class="wrap">${warn}
     <div class="card"><h3>Форма касания <span id="tf_state" style="text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim)"></span></h3>
       <p class="note" style="margin:0 0 8px">Сохраняется сама. Перетащи за ≡, чтобы поменять порядок. Галочка — блок виден менеджеру. Подпись можно заменить своей,
-      пустая — стандартная. Выключенный блок берёт значение по умолчанию: исход «Ответил», шаг через день по умолчанию.</p>
+      пустая — стандартная. Выключенный блок берёт значение по умолчанию: канал — первый в списке каналов, исход «Ответил», шаг через день по умолчанию.</p>
       ${blocks}
       <label for="tf_days">Чипы даты следующего шага, дней через запятую</label>
       <input id="tf_days" type="text" inputmode="numeric" value="${cfg.days.join(', ')}" style="font-family:var(--mono)">
       <label for="tf_day">Выбрано по умолчанию</label>
       <select id="tf_day">${cfg.days.map(n=>`<option value="${n}" ${n===cfg.day?'selected':''}>${dayLabel(n)}</option>`).join('')}</select>
       <button class="btn ghost" id="tf_reset">Вернуть стандартную форму</button>
+      <p class="note">Отчёт показывает только то, что собирает форма. Без «Как связался» нет раскладки по каналам,
+      без «Чем закончилось» — дозвона, без «Говорил с» — ЛПР и уровня контакта. Выключенный блок пропадает из отчёта.</p>
     </div>
+    <div class="card"><h3>Каналы связи</h3>${chans}
+      <button class="btn ghost" data-dict-new="chan">Добавить канал</button>
+      <p class="note">Включённые каналы — чипы «Как связался» в касании и строки отчёта. Звонок один: по нему считается
+      норма «Звонки». Свой канал — переписка (Telegram, почта) или встреча (выезд). У переписки исход «Без ответа»
+      не считается недозвоном, у встречи недозвона нет.</p></div>
     <div class="card"><h3>Этапы воронки</h3>${stages}
       <button class="btn ghost" data-dict-new="stage">Добавить этап</button>
       <p class="note">Название правится прямо в строке. ≡ — перетащить, ⋯ — выключить или выбрать скрипт.
-      «В MRR» — лиды на этапе считаются в сумме «В работе». Свой этап, как любой открытый, требует дату следующего шага.</p></div>
+      «В MRR» — лиды на этапе считаются в сумме «В работе». Свой этап, как любой открытый, требует дату следующего шага.
+      Шаги воронки по порядку — строки конверсии в отчёте; этап вроде «Вернуться в сезон» из конверсии убери.</p></div>
     <div class="card"><h3>Причины отказа</h3>${reasons}
       <button class="btn ghost" data-dict-new="lost">Добавить причину</button></div>
     <div class="card"><h3>Тарифы</h3>${tariffs}
@@ -2455,11 +2522,12 @@ const DICT = {
   stage:  { table:'stages',       key:'code', list:()=>S.stages,      name:'этап' },
   lost:   { table:'lost_reasons', key:'code', list:()=>S.lostReasons, name:'причину' },
   tariff: { table:'tariffs',      key:'code', list:()=>S.tariffs,     name:'тариф' },
+  chan:   { table:'channels',     key:'code', list:()=>S.channels,    name:'канал' },
 };
 // Понятный текст вместо «violates foreign key constraint»
 function dictErr(e){
   const m=e.message||'';
-  if(/foreign key|violates/i.test(m)) return 'Значение используется в лидах. Выключи его вместо удаления';
+  if(/foreign key|violates/i.test(m)) return 'Значение уже используется. Выключи его вместо удаления';
   if(/duplicate/i.test(m)) return 'Такой код уже есть';
   return m;
 }
@@ -2495,7 +2563,7 @@ function initSort(box, done){
 function syncSettingsCache(){
   const c=CACHE.get('settings'); if(!c) return;
   Object.assign(c, { tariffs:S.tariffs, segments:S.segments, stages:S.stages,
-    lostReasons:S.lostReasons, touchCfg:S.touchCfg });
+    lostReasons:S.lostReasons, touchCfg:S.touchCfg, channels:S.channels });
   clearTimeout(cacheSet.t); cacheSet.t=setTimeout(persistCache, 800);
 }
 async function saveOrder(kind, codes){
@@ -2542,16 +2610,22 @@ function autosaveTouch(){
 // Лист правки этапа, причины или тарифа
 function dictSheet(kind, x){
   const D=DICT[kind], isNew=!x;
-  x = x || { title:'', active:true, system:false, in_pipeline:false, script_stage:null, setup_amount:'', mrr_amount:'' };
+  x = x || { title:'', active:true, system:false, in_pipeline:false, in_funnel:true, script_stage:null, setup_amount:'', mrr_amount:'', kind:'message' };
   const fixed = kind==='stage' && FIXED_ST.includes(x.code);
   const extra = kind==='stage' ? `
       <label for="ds_script">Какой скрипт открывать на этапе</label>
       <select id="ds_script"><option value="">Первый звонок (по умолчанию)</option>${Object.entries(STAGE).map(([k,v])=>
         `<option value="${k}" ${x.script_stage===k?'selected':''}>${v}</option>`).join('')}</select>
-      ${['new','won','lost'].includes(x.code)?'':`<label class="check"><input type="checkbox" id="ds_pipe" ${x.in_pipeline?'checked':''}> Считать в «MRR в работе»</label>`}`
+      ${['new','won','lost'].includes(x.code)?'':`<label class="check"><input type="checkbox" id="ds_pipe" ${x.in_pipeline?'checked':''}> Считать в «MRR в работе»</label>`}
+      ${['new','no_answer','won','lost'].includes(x.code)?'':`<label class="check"><input type="checkbox" id="ds_funnel" ${inFunnel(x)?'checked':''}> Шаг воронки: строка конверсии в отчёте</label>`}`
     : kind==='tariff' ? `
       <div class="two"><div><label for="ds_setup">Внедрение, ₽</label><input id="ds_setup" type="number" inputmode="numeric" value="${x.setup_amount??''}"></div>
-        <div><label for="ds_mrr">Подписка, ₽/мес</label><input id="ds_mrr" type="number" inputmode="numeric" value="${x.mrr_amount??''}"></div></div>` : '';
+        <div><label for="ds_mrr">Подписка, ₽/мес</label><input id="ds_mrr" type="number" inputmode="numeric" value="${x.mrr_amount??''}"></div></div>`
+    : kind==='chan' ? (x.system ? `<p class="note" style="margin-bottom:0">Вид: ${KIND[x.kind]}.</p>`
+      : `<label for="ds_kind">Вид</label>
+      <select id="ds_kind"><option value="message" ${x.kind!=='meeting'?'selected':''}>Переписка</option>
+        <option value="meeting" ${x.kind==='meeting'?'selected':''}>Встреча</option></select>
+      <p class="note" style="margin-bottom:0">У переписки исход «Без ответа» не считается недозвоном. У встречи недозвона нет.</p>`) : '';
   const d=document.createElement('div'); d.className='sheet';
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 6px;font-size:19px">${isNew?'Добавить '+D.name:esc(x.title)}</h2>
@@ -2570,7 +2644,15 @@ function dictSheet(kind, x){
   $('ds_save').onclick=async()=>{
     const body={ title:$('ds_title').value.trim(), active:$('ds_active').checked };
     if(!body.title) return toast('Впиши название',true);
-    if(kind==='stage'){ body.script_stage=$('ds_script').value||null; if($('ds_pipe')) body.in_pipeline=$('ds_pipe').checked; }
+    if(kind==='stage'){ body.script_stage=$('ds_script').value||null; if($('ds_pipe')) body.in_pipeline=$('ds_pipe').checked;
+      // Без миграции 19 колонки нет: не шлём её, иначе база отклонит всю правку
+      if($('ds_funnel') && S.chanLive) body.in_funnel=$('ds_funnel').checked; }
+    if(kind==='chan'){
+      if($('ds_kind')) body.kind=$('ds_kind').value;
+      // Последний канал не выключаем: касанию не из чего будет выбрать
+      if(!body.active && x.active!==false && touchChannels().filter(c=>c.code!==x.code).length===0)
+        return toast('Это последний включённый канал. Сначала включи другой',true);
+    }
     if(kind==='tariff'){
       body.setup_amount=+$('ds_setup').value; body.mrr_amount=+$('ds_mrr').value;
       if(!($('ds_setup').value && $('ds_mrr').value) || body.setup_amount<0 || body.mrr_amount<0) return toast('Впиши обе суммы',true);
@@ -2579,7 +2661,7 @@ function dictSheet(kind, x){
     try{
       if(isNew){
         // Код — служебный: латиница, по нему лид ссылается на справочник
-        body.code=(kind==='tariff'?'t':kind==='stage'?'s':'r')+'_'+Date.now().toString(36);
+        body.code=({tariff:'t',stage:'s',chan:'c'}[kind]||'r')+'_'+Date.now().toString(36);
         body.sort_order=Math.max(0,...D.list().map(y=>y.sort_order||0))+10;
         // Новый этап встаёт перед «Клиентом», а не после «Отказа»: он открытый
         if(kind==='stage'){
@@ -2714,7 +2796,7 @@ async function exportAll(){
         return v; })));
     const f2=csvOf(['Когда','Компания','Автор','Канал','Исход','Говорил с','Демо','Этап было','Этап стало','Комментарий'],
       acts.map(a=>[dtTxt(a.created_at), name.get(a.lead_id)||a.lead_id, who[a.author_id]||'',
-        CHAN[a.channel]||a.channel, OUT[a.outcome]||a.outcome||'', LEVEL[a.spoke_with]||'',
+        CHAN[a.channel]||a.channel, outLabel(chanKind(a.channel), a.outcome), LEVEL[a.spoke_with]||'',
         DEMO[a.demo]||'', a.status_from?STATUS[a.status_from]||a.status_from:'',
         a.status_to?STATUS[a.status_to]||a.status_to:'', a.comment]));
     const f3=csvOf(['Компания','Имя','Должность','Телефон','ЛПР','Основной номер'],
@@ -2926,12 +3008,28 @@ function periodRange(kind){
   return {from:start.toISOString(), to:end.toISOString(), start, kind};
 }
 
+// Отчёт строится из того, что настроено: каналы — из справочника каналов,
+// воронка — из этапов, конверсия — из этапов с флагом «шаг воронки». Метрика,
+// которую форма касания не собирает (блок выключен), из отчёта пропадает:
+// выключенный «Говорил с» даёт ноль ЛПР не потому, что их не было.
+// Определения те же, что у плана (v_kpi_day, db/19_metrics.sql):
+//   звонок — касание каналом «звонок» с любым исходом;
+//   дозвон — звонок, где трубку взяли: всё, кроме «Не взял»;
+//   разговор — исход «Ответил» или «Отказ» в любом канале.
+const CALL_OUT = ['answered','no_answer','callback','refused'];
+const TALK_OUT = ['answered','refused'];
+const LV_RANK = { admin:1, manager:2, owner:3 };
+
 async function loadReport(){
   const {from,to,kind}=periodRange(S.period);
-  const [acts, leads, team] = await Promise.all([
+  const [acts, leads, team, lvRows] = await Promise.all([
     db(`activities?created_at=gte.${from}&created_at=lt.${to}&select=*&order=created_at`),
     db('v_leads?select=*'),
-    isAdmin() ? db('v_team_today?select=*') : db('v_plan_today?select=*')
+    isAdmin() ? db('v_team_today?select=*') : db('v_plan_today?select=*'),
+    // Все разговоры с уровнем до конца периода: уровень лида на момент перехода
+    // по этапу, а не сегодняшний. Иначе «Демо получил» у администратора
+    // записывался собственнику, если до собственника дошли неделей позже.
+    db(`activities?spoke_with=not.is.null&created_at=lt.${to}&select=lead_id,spoke_with,created_at`)
   ]);
   // Строка плана только для «сегодня»: план задаётся на день
   let planLine=null;
@@ -2948,66 +3046,108 @@ async function loadReport(){
   const byLead=new Map(leads.map(l=>[l.id,l]));
   const mine=a=>who==='all' || a.author_id===who;
   const leadMine=l=>who==='all' || l.owner_id===who;
+  const on=id=>tBlock(id).on;
 
-  const touches=acts.filter(a=>a.channel!=='system' && mine(a));
-  const sys=acts.filter(a=>a.channel==='system' && mine(a));
+  // Заметка — не касание: «поправка: администратора зовут Таиса» не звонок.
+  // В ленте она остаётся, в счёте её нет.
+  const isNote=a=>a.channel==='other' && a.outcome==='other';
+  const feed=acts.filter(a=>a.channel!=='system' && mine(a));
+  const touches=feed.filter(a=>!isNote(a));
+  const sys=acts.filter(a=>a.channel==='system' && mine(a) && a.status_to);
+  // Смена этапа — только настоящая. Отметка оплаты пишется в журнал тем же
+  // каналом system с одинаковым этапом до и после, и раньше каждая оплата
+  // считалась новой продажей.
+  const moves=sys.filter(a=>a.status_to!==a.status_from);
 
   const cnt=(arr,f)=>arr.filter(f).length;
-  const chan=k=>cnt(touches,a=>a.channel===k);
+  const ids=(arr,f=()=>true)=>new Set(arr.filter(f).map(a=>a.lead_id));
 
-  // Движение по воронке считаем по системным записям смены статуса.
-  // Рядом раскладка по уровню контакта лида: собственник / управляющий / администратор / никто
-  const moved=t=>cnt(sys,a=>a.status_to===t);
-  const byLevel=t=>{ const o={owner:0,manager:0,admin:0,none:0};
-    sys.filter(a=>a.status_to===t).forEach(a=>{ o[byLead.get(a.lead_id)?.level||'none']++; }); return o; };
+  // Звонки и дозвон
+  const calls=touches.filter(a=>chanKind(a.channel)==='call' && CALL_OUT.includes(a.outcome));
+  const reached=cnt(calls,a=>a.outcome!=='no_answer');
+  const talks=cnt(touches,a=>TALK_OUT.includes(a.outcome));
+  // Исход выключен в форме — каждое касание «Ответил», дозвон всегда 100%
+  const showRate=on('outcome');
+  const rate = showRate && calls.length ? Math.round(reached/calls.length*100) : null;
 
-  const closedIn=st=>leads.filter(l=>l.status===st && leadMine(l) &&
-    sys.some(a=>a.lead_id===l.id && a.status_to===st));
+  // Каналы: включённые в справочнике плюс выключенные, по которым были касания
+  const chRows=S.channels.filter(c=>c.kind!=='service')
+    .map(c=>({code:c.code, l:c.title, n:cnt(touches,a=>a.channel===c.code), active:c.active}));
+  touches.forEach(a=>{ if(!chRows.some(c=>c.code===a.channel))
+    chRows.push({code:a.channel, l:CHAN[a.channel]||a.channel, n:cnt(touches,x=>x.channel===a.channel), active:false}); });
+  const channels=chRows.filter(c=>c.active||c.n);
+  // Канал не выбирают — всё уходит в первый по списку, раскладка ничего не значит
+  const showCh = on('channel') || channels.filter(c=>c.n).length>1;
+
+  // Уровень контакта на момент события
+  const talksBy=new Map();
+  lvRows.forEach(x=>{ if(!talksBy.has(x.lead_id)) talksBy.set(x.lead_id,[]); talksBy.get(x.lead_id).push(x); });
+  const levelAt=(leadId,t)=>{ let best=null; const tt=Date.parse(t);
+    (talksBy.get(leadId)||[]).forEach(x=>{ if(Date.parse(x.created_at)<=tt && (!best||LV_RANK[x.spoke_with]>LV_RANK[best])) best=x.spoke_with; });
+    return best||'none'; };
+  const showLv = on('level') || touches.some(a=>a.spoke_with);
+  const dmTouch=cnt(touches,a=>a.with_dm);
+  const dmLeads=ids(touches,a=>a.with_dm).size;
+
+  // Движение по воронке: сколько лидов перешло на этап за период. Клиент и отказ —
+  // только те, кто на этом этапе и остался: сделку, возвращённую в работу, не считаем
+  const closedIn=st=>leads.filter(l=>l.status===st && leadMine(l) && moves.some(a=>a.lead_id===l.id && a.status_to===st));
   const won=closedIn('won'), lost=closedIn('lost');
+  const funnel=S.stages.filter(s=>!['new','no_answer'].includes(s.code)).map(s=>{
+    const list = s.code==='won' ? won.map(l=>l.id) : s.code==='lost' ? lost.map(l=>l.id) : [...ids(moves,a=>a.status_to===s.code)];
+    const lv={owner:0,manager:0,admin:0,none:0};
+    list.forEach(id=>{ const m=moves.find(a=>a.lead_id===id && a.status_to===s.code); lv[m?levelAt(id,m.created_at):'none']++; });
+    return { l:s.title, n:list.length, lv, active:s.active, tone: s.code==='won'?'acc':s.code==='lost'?'bad':'txt' };
+  }).filter(x=>x.active||x.n);
+
+  // Докуда дошли лиды периода. Когорта — лиды, которых касались или двигали за
+  // период. Лид считается на шаге, если дошёл до него или дальше: текущий этап,
+  // этапы из переходов периода (до отказа тоже), отправленное демо. Поэтому каждая
+  // строка не больше предыдущей и процент от предыдущей не бывает выше 100.
+  const steps=S.stages.filter(inFunnel);
+  const idx=code=>steps.findIndex(s=>s.code===code);
+  const cohort=new Set([...ids(touches), ...ids(moves)]);
+  const far=new Map();
+  cohort.forEach(id=>{
+    let k=idx(byLead.get(id)?.status);
+    moves.filter(a=>a.lead_id===id).forEach(a=>{ k=Math.max(k, idx(a.status_to), idx(a.status_from)); });
+    if(touches.some(a=>a.lead_id===id && a.demo)) k=Math.max(k, idx('brief_done'));
+    far.set(id,k);
+  });
+  const conv=[['В работе', cohort.size],
+    ...steps.map((s,i)=>[s.title, [...far.values()].filter(k=>k>=i).length, s.active])
+      .filter(([,n,act])=>act||n).map(([l,n])=>[l,n])];
+  const showDemo = on('demo') || touches.some(a=>a.demo);
+  const demos={ general:cnt(touches,a=>a.demo==='general'), custom:cnt(touches,a=>a.demo==='custom') };
 
   // Поступило за период — по датам отметок об оплате
-  const {from:pFrom,to:pTo}=periodRange(S.period);
   let cash=0;
   leads.filter(leadMine).forEach(l=>{
-    const inRange=d=>d && d>=pFrom && d<pTo;
+    const inRange=d=>d && d>=from && d<to;
     if(inRange(l.paid_1_at)) cash+=l.stage1_amount||0;
     if(inRange(l.paid_2_at)) cash+=l.stage2_amount||0;
     if(inRange(l.paid_3_at)) cash+=l.stage3_amount||0;
   });
   const cashTotal=leads.filter(leadMine).reduce((s,l)=>s+(l.paid_total||0),0);
 
-  const dmTouch=cnt(touches,a=>a.with_dm);
-  const dmLeads=new Set(touches.filter(a=>a.with_dm).map(a=>a.lead_id)).size;
-  const answered=cnt(touches,a=>a.outcome==='answered');
-  const attempts=cnt(touches,a=>a.outcome==='answered'||a.outcome==='no_answer');
-
-  const lostBy={};
-  lost.forEach(l=>{ if(l.lost_reason) lostBy[l.lost_reason]=(lostBy[l.lost_reason]||0)+1; });
-
-  // Конверсия по лидам за период: не счётчики по этапам, а сколько дошло до следующего
-  const uniq=(arr,f)=>new Set(arr.filter(f).map(a=>a.lead_id)).size;
-  const conv=[
-    ['Касались',        uniq(touches, ()=>true)],
-    ['Говорили с ЛПР',  uniq(touches, a=>a.with_dm)],
-    // Демо считаем и по отметке в касании, и по переходу на этап «Демо получил»:
-    // блок «Отправил демо» в форме касания админ может выключить
-    ['Получили демо',   new Set([...touches.filter(a=>a.demo), ...sys.filter(a=>a.status_to==='brief_done')].map(a=>a.lead_id)).size],
-    ['Услышали цену',   uniq(sys, a=>a.status_to==='proposal_sent')],
-    ['Купили',          uniq(sys, a=>a.status_to==='won')],
-  ];
-  const demos={ general:cnt(touches,a=>a.demo==='general'), custom:cnt(touches,a=>a.demo==='custom') };
+  // Причины отказа в порядке справочника
+  const lostBy=[];
+  lost.forEach(l=>{ if(!l.lost_reason) return; const x=lostBy.find(r=>r[0]===l.lost_reason);
+    if(x) x[1]++; else lostBy.push([l.lost_reason,1]); });
+  const rOrder=code=>{ const i=S.lostReasons.findIndex(r=>r.code===code); return i<0?999:i; };
+  lostBy.sort((a,b)=>rOrder(a[0])-rOrder(b[0]));
 
   // С кем работали за период: лид попадает сюда, если его касались. Смену этапа
-  // подкладываем к тому же лиду — в текстовом отчёте она стоит рядом с касанием,
-  // ради которого её сделали, и видно, что именно сдвинуло сделку.
+  // и оплату подкладываем к тому же лиду — в текстовом отчёте она стоит рядом с
+  // касанием, ради которого её сделали, и видно, что именно сдвинуло сделку.
   const wmap=new Map();
-  touches.forEach(a=>{
+  feed.forEach(a=>{
     const lead=byLead.get(a.lead_id); if(!lead) return;
     let w=wmap.get(a.lead_id);
     if(!w){ w={lead, acts:[], touches:0}; wmap.set(a.lead_id, w); }
-    w.acts.push(a); w.touches++;
+    w.acts.push(a); if(!isNote(a)) w.touches++;
   });
-  sys.forEach(a=>{ const w=wmap.get(a.lead_id); if(w && a.status_to) w.acts.push(a); });
+  sys.forEach(a=>{ const w=wmap.get(a.lead_id); if(w) w.acts.push(a); });
   const worked=[...wmap.values()];
   const at=x=>x.created_at;
   worked.forEach(w=>{
@@ -3016,6 +3156,18 @@ async function loadReport(){
   });
   worked.sort((a,b)=> a.last<b.last ? 1 : a.last>b.last ? -1 : 0);
 
+  const pl=(n,a,b,c)=>`${n} ${plural(n,a,b,c)}`;
+  const sumLine=[pl(worked.length,'лид','лида','лидов'), pl(touches.length,'касание','касания','касаний'),
+    showRate&&calls.length ? `дозвон ${reached} из ${pl(calls.length,'звонка','звонков','звонков')}` : '',
+    `разговоров ${talks}`].filter(Boolean).join(' · ');
+  const off=[!showCh&&'каналы', !showRate&&'дозвон', !showLv&&'ЛПР и уровень контакта'].filter(Boolean);
+
+  // Три главных числа. То, что форма не собирает, заменяется тем, что собирает
+  const tiles=[[touches.length,'касаний','acc']];
+  tiles.push(showRate ? [rate==null?'—':rate+'%','дозвон', rate==null?'dim':rate>=40?'acc':'warn']
+    : [ids(moves).size,'сдвинули этап','txt']);
+  tiles.push(showLv ? [dmLeads,'вышли на ЛПР','txt'] : [cohort.size,'лидов в работе','txt']);
+
   return { report:{
     worked,
     // Имя автора нужно только в общекомандном отчёте: у менеджера все касания свои
@@ -3023,267 +3175,131 @@ async function loadReport(){
     nameById: Object.fromEntries(S.staff.map(u=>[u.id,u.name])),
     kind, start:periodRange(S.period).start,
     who: who==='all' ? 'вся команда' : (S.staff.find(u=>u.id===who)?.name || S.prof.name),
-    touches:touches.length,
-    answered, attempts,
-    rate: attempts ? Math.round(answered/attempts*100) : null,
-    call:chan('call'), wa:chan('whatsapp'), ig:chan('instagram'), meet:chan('meeting'),
-    contacted:moved('contacted'), brief:moved('brief_done'),
-    proposal:moved('proposal_sent'), nego:moved('negotiation'),
+    touches:touches.length, calls:calls.length, reached, rate, talks, sumLine, off, tiles,
+    channels: showCh ? channels : null, showLv, showRate, showDemo, funnel, conv, demos,
     won:won.length, lost:lost.length,
-    levels:{ contacted:byLevel('contacted'), brief:byLevel('brief_done'), proposal:byLevel('proposal_sent'),
-             nego:byLevel('negotiation'), won:byLevel('won'), lost:byLevel('lost') },
     setupSum:won.reduce((s,l)=>s+(l.setup_amount||0),0),
     mrrSum:won.reduce((s,l)=>s+(l.mrr_amount||0),0),
-    dmTouch, dmLeads, lostBy, cash, cashTotal, planLine, conv, demos,
+    dmTouch, dmLeads, lostBy, cash, cashTotal, planLine,
     pipeline:leads.filter(l=>leadMine(l)&&stageOf(l.status)?.in_pipeline)
                   .reduce((s,l)=>s+(l.mrr_amount||0),0)
   } };
 }
 
-function reportSVG(r){
-  // Одна колонка: так отчёт читается на телефоне и уходит картинкой в мессенджер.
-  // Для широкого экрана есть reportSVGWide, там те же цифры в два столбца.
-  const W=760;
-  const T={ink:'#080808',card:'#141414',line:'#262626',txt:'#F2F2F2',mut:'#8A8A8A',
-           dim:'#5C5C5C',acc:'#00E676',warn:'#FFB020',bad:'#FF5252'};
-  const F='-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif';
-  const M='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
-  const e=t=>String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+// Блоки отчёта одинаковыми строками: подпись, число, хвост справа (уровни,
+// процент) или полоска. Одна колонка и две колонки рисуют одно и то же.
+function reportCards(r){
   const nf=n=>new Intl.NumberFormat('ru-RU').format(n||0);
-  const per={today:'за сегодня',week:'за 7 дней',month:'за 30 дней'}[r.kind];
-  const dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
-
-  let y=0; const p=[];
-  const box=(x,yy,w,h,fill)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="14" fill="${fill||T.card}" stroke="${T.line}"/>`);
-  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c||T.txt}" font-family="${o.m?M:F}" font-size="${o.s||16}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
-
-  // шапка
-  p.push(`<rect x="0" y="0" width="${W}" height="112" fill="${T.ink}"/>`);
-  p.push(`<rect x="0" y="108" width="${W}" height="4" fill="${T.acc}"/>`);
-  tx(32,52,'balance',{s:30,w:700});
-  p.push(`<circle cx="150" cy="46" r="5" fill="${T.acc}"/>`);
-  tx(32,82,`Отчёт ${per} · ${r.who}`,{s:15,c:T.mut});
-  tx(W-32,52,dt,{s:15,c:T.mut,a:'end'});
-  y=144;
-
-  // три главных числа
-  const big=[[r.touches,'касаний',T.acc],
-             [r.rate==null?'—':r.rate+'%','дозвон',r.rate>=40?T.acc:T.warn],
-             [r.dmLeads,'вышли на ЛПР',T.txt]];
-  const bw=(W-64-24)/3;
-  big.forEach(([v,l,c],i)=>{
-    const x=32+i*(bw+12);
-    box(x,y,bw,104);
-    tx(x+bw/2,y+56,v,{s:38,w:600,c,a:'middle',m:true});
-    tx(x+bw/2,y+82,l,{s:14,c:T.mut,a:'middle'});
-  });
-  y+=124;
-  if(r.planLine){ tx(32,y+2,r.planLine,{s:14,c:T.mut,m:true}); y+=26; }
-
-  // каналы
-  const ch=[['Звонки',r.call],['WhatsApp',r.wa],['Instagram',r.ig],['Встречи',r.meet]];
-  const max=Math.max(1,...ch.map(c=>c[1]));
-  const chH=52+ch.length*34;
-  box(32,y,W-64,chH);
-  tx(56,y+32,'КАНАЛЫ',{s:12,w:600,c:T.mut,ls:'1.4'});
-  ch.forEach(([l,v],i)=>{
-    const yy=y+62+i*34;
-    tx(56,yy,l,{s:15,c:T.txt});
-    const bx=210, bw2=W-64-210-70;
-    p.push(`<rect x="${bx}" y="${yy-13}" width="${bw2}" height="16" rx="8" fill="${T.line}"/>`);
-    if(v) p.push(`<rect x="${bx}" y="${yy-13}" width="${Math.max(16,bw2*v/max)}" height="16" rx="8" fill="${T.acc}"/>`);
-    tx(W-56,yy,v,{s:15,m:true,a:'end',c:v?T.txt:T.dim});
-  });
-  y+=chH+16;
-
-  // воронка: строка на этап, справа раскладка по уровню контакта
-  const fn=[[STATUS.contacted,r.contacted,r.levels?.contacted],[STATUS.brief_done,r.brief,r.levels?.brief],
-            [STATUS.proposal_sent,r.proposal,r.levels?.proposal],[STATUS.negotiation,r.nego,r.levels?.nego],
-            ['Продано',r.won,r.levels?.won],['Отказ',r.lost,r.levels?.lost]];
-  const fH=52+fn.length*32;
-  box(32,y,W-64,fH);
-  tx(56,y+32,'ДВИЖЕНИЕ ПО ВОРОНКЕ',{s:12,w:600,c:T.mut,ls:'1.4'});
-  tx(W-56,y+32,'собств · управл · админ · никто',{s:12,c:T.dim,a:'end',m:true});
-  fn.forEach(([l,v,lv],i)=>{
-    const yy=y+64+i*32;
-    const c = l==='Продано'&&v ? T.acc : l==='Отказ'&&v ? T.bad : T.txt;
-    tx(56,yy,l,{s:15,c:T.mut});
-    tx(W-56-150,yy,v,{s:18,w:600,m:true,a:'end',c:v?c:T.dim});
-    if(lv) tx(W-56,yy,`${lv.owner} · ${lv.manager} · ${lv.admin} · ${lv.none}`,{s:14,m:true,a:'end',c:v?T.mut:T.dim});
-  });
-  y+=fH+16;
-
-  // конверсия: каждая строка в процентах от предыдущей
-  const cv=r.conv||[];
-  if(cv.length){
-    const cH=52+cv.length*30;
-    box(32,y,W-64,cH);
-    tx(56,y+32,'КОНВЕРСИЯ ПО ЛИДАМ',{s:12,w:600,c:T.mut,ls:'1.4'});
-    tx(W-56,y+32,`демо: общих ${r.demos?.general||0} · индивидуальных ${r.demos?.custom||0}`,{s:12,c:T.dim,a:'end',m:true});
-    cv.forEach(([l,v],i)=>{
-      const yy=y+62+i*30, prev=i?cv[i-1][1]:0;
-      const pct = i && prev ? Math.round(v/prev*100)+'%' : '';
-      tx(56,yy,l,{s:15,c:T.txt});
-      tx(W-140,yy,v,{s:15,m:true,a:'end',c:v?T.txt:T.dim});
-      tx(W-56,yy,pct,{s:14,m:true,a:'end',c:!pct?T.dim:v/prev>=0.5?T.acc:T.warn});
-    });
-    y+=cH+16;
+  const cards=[];
+  if(r.channels){
+    const max=Math.max(1,...r.channels.map(c=>c.n));
+    cards.push({ t:'КАНАЛЫ', right: r.showRate&&r.calls ? `дозвон ${r.reached} из ${r.calls}` : '',
+      rows:r.channels.map(c=>({l:c.l, v:c.n, c:c.n?'txt':'dim', bar:c.n/max})) });
   }
-
-  // деньги
-  box(32,y,W-64,180);
-  tx(56,y+32,'ДЕНЬГИ',{s:12,w:600,c:T.mut,ls:'1.4'});
-  const mo=[['Поступило за период',nf(r.cash)+' ₽',r.cash?T.acc:T.dim],
-            ['Продано, внедрение',nf(r.setupSum)+' ₽',r.setupSum?T.acc:T.dim],
-            ['Продано, подписка',nf(r.mrrSum)+' ₽/мес',r.mrrSum?T.acc:T.dim],
-            ['Собрано всего',nf(r.cashTotal)+' ₽',T.txt],
-            ['В работе, подписка',nf(r.pipeline)+' ₽/мес',T.txt]];
-  mo.slice(0,3).forEach(([l,v,c],i)=>{
-    const x=56+i*((W-112)/3);
-    tx(x,y+70,l,{s:13,c:T.mut});
-    tx(x,y+96,v,{s:19,w:600,m:true,c});
-  });
-  p.push(`<line x1="56" y1="${y+118}" x2="${W-56}" y2="${y+118}" stroke="${T.line}"/>`);
-  mo.slice(3).forEach(([l,v,c],i)=>{
-    const x=56+i*((W-112)/3);
-    tx(x,y+142,l,{s:13,c:T.mut});
-    tx(x,y+166,v,{s:17,w:600,m:true,c});
-  });
-  y+=196;
-
-  // причины отказов
-  const reasons=Object.entries(r.lostBy);
-  if(reasons.length){
-    const rH=52+reasons.length*30;
-    box(32,y,W-64,rH);
-    tx(56,y+32,'ПОЧЕМУ ОТКАЗАЛИ',{s:12,w:600,c:T.mut,ls:'1.4'});
-    reasons.forEach(([k,v],i)=>{
-      const yy=y+62+i*30;
-      tx(56,yy,LOST[k]||k,{s:15,c:T.txt});
-      tx(W-56,yy,v,{s:15,m:true,a:'end',c:T.bad});
-    });
-    y+=rH+16;
-  }
-
-  tx(W/2,y+18,`Разговоров с ЛПР: ${r.dmTouch} · сформировано ${
-    new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`,
-    {s:13,c:T.dim,a:'middle'});
-  y+=44;
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}">
-    <rect width="${W}" height="${y}" fill="${T.ink}"/>${p.join('')}</svg>`;
+  cards.push({ t:'ДВИЖЕНИЕ ПО ВОРОНКЕ', right: r.showLv ? 'соб · упр · адм · никто' : 'лидов', xw:'lv',
+    rows:r.funnel.map(f=>({l:f.l, lc:'mut', v:f.n, c:f.n?f.tone:'dim', big:true,
+      x: r.showLv ? `${f.lv.owner} · ${f.lv.manager} · ${f.lv.admin} · ${f.lv.none}` : null, xc:f.n?'mut':'dim'})) });
+  cards.push({ t:'ДОКУДА ДОШЛИ ЛИДЫ', xw:'pct',
+    right: r.showDemo ? `демо: общих ${r.demos.general} · индивид. ${r.demos.custom}` : '',
+    rows:r.conv.map(([l,v],i)=>{ const prev=i?r.conv[i-1][1]:0;
+      const pct = i && prev ? Math.round(v/prev*100) : null;
+      return {l, v, c:v?'txt':'dim', x:pct==null?'':pct+'%', xc:pct==null?'dim':pct>=50?'acc':'warn'}; }) });
+  cards.push({ t:'ДЕНЬГИ', rows:[
+    {l:'Поступило за период', lc:'mut', v:nf(r.cash)+' ₽', c:r.cash?'acc':'dim'},
+    {l:'Продано, внедрение', lc:'mut', v:nf(r.setupSum)+' ₽', c:r.setupSum?'acc':'dim'},
+    {l:'Продано, подписка', lc:'mut', v:nf(r.mrrSum)+' ₽/мес', c:r.mrrSum?'acc':'dim'},
+    {l:'Собрано всего', lc:'mut', v:nf(r.cashTotal)+' ₽', c:'txt'},
+    {l:'В работе, подписка', lc:'mut', v:nf(r.pipeline)+' ₽/мес', c:'txt'}] });
+  if(r.lostBy.length) cards.push({ t:'ПОЧЕМУ ОТКАЗАЛИ',
+    rows:r.lostBy.map(([k,v])=>({l:LOST[k]||k, v, c:'bad'})) });
+  return cards;
 }
 
-function reportSVGWide(r){
-  // Плотная сетка: три числа, потом два столбца по два блока. На 760 px ширины
-  // отчёт помещается в один экран компьютера и остаётся картинкой для мессенджера.
-  const W=760, G=12, P=32, CW=(W-2*P-G)/2;
+function reportSVG(r){ return reportDraw(r, false); }
+function reportSVGWide(r){ return reportDraw(r, true); }
+
+// Одна колонка: так отчёт читается на телефоне и уходит картинкой в мессенджер.
+// Широкий экран: те же блоки парами в два столбца, отчёт помещается в один экран.
+function reportDraw(r, wide){
+  const W=760, P=32, G=12;
   const T={ink:'#080808',card:'#141414',line:'#262626',txt:'#F2F2F2',mut:'#8A8A8A',
            dim:'#5C5C5C',acc:'#00E676',warn:'#FFB020',bad:'#FF5252'};
   const F='-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif';
   const M='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
   const e=t=>String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const nf=n=>new Intl.NumberFormat('ru-RU').format(n||0);
   const per={today:'за сегодня',week:'за 7 дней',month:'за 30 дней'}[r.kind];
   const dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
+  // Размеры двух раскладок
+  const Z = wide
+    ? {hd:84, logo:26, sub:13, tileH:78, tileV:30, tileL:12, head:26, hs:11, first:60, step:27, pad:20, fs:13.5, big:15, xs:11.5,
+       top:44, bottom:6, rad:12, lvW:92, pctW:50, barL:92, barR:56, barH:12}
+    : {hd:112, logo:30, sub:15, tileH:104, tileV:38, tileL:14, head:32, hs:12, first:62, step:30, pad:24, fs:15, big:18, xs:14,
+       top:52, bottom:0, rad:14, lvW:150, pctW:84, barL:154, barR:70, barH:16};
 
   const p=[];
-  const box=(x,yy,w,h,fill)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="12" fill="${fill||T.card}" stroke="${T.line}"/>`);
-  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c||T.txt}" font-family="${o.m?M:F}" font-size="${o.s||14}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
-  const head=(x,yy,t,right)=>{ tx(x+20,yy+26,t,{s:11,w:600,c:T.mut,ls:'1.2'}); if(right) tx(x+CW-20,yy+26,right,{s:10.5,c:T.dim,a:'end',m:true}); };
+  const box=(x,yy,w,h)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="${Z.rad}" fill="${T.card}" stroke="${T.line}"/>`);
+  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c||T.txt}" font-family="${o.m?M:F}" font-size="${o.s||Z.fs}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
+  const cardH=c=>Z.top+c.rows.length*Z.step+Z.bottom;
+  const card=(c,x,y,w,h)=>{
+    box(x,y,w,h);
+    tx(x+Z.pad,y+Z.head,c.t,{s:Z.hs,w:600,c:T.mut,ls:wide?'1.2':'1.4'});
+    // В узкой колонке уровни пишем без пробелов, иначе они наезжают на заголовок
+    const tight=t=>wide ? String(t).replace(/ · /g,'·') : t;
+    if(c.right) tx(x+w-Z.pad,y+Z.head,tight(c.right),{s:Z.hs-(wide?0.5:0),c:T.dim,a:'end',m:true});
+    const xw = c.xw==='lv' ? Z.lvW : c.xw==='pct' ? Z.pctW : 0;
+    c.rows.forEach((row,i)=>{
+      const yy=y+Z.first+i*Z.step, R=x+w-Z.pad;
+      tx(x+Z.pad,yy,row.l,{c:T[row.lc||'txt']});
+      if(row.bar!=null){
+        const bx=x+Z.pad+Z.barL, bw=w-Z.pad-Z.barL-Z.barR;
+        p.push(`<rect x="${bx}" y="${yy-Z.barH+3}" width="${bw}" height="${Z.barH}" rx="${Z.barH/2}" fill="${T.line}"/>`);
+        if(row.v) p.push(`<rect x="${bx}" y="${yy-Z.barH+3}" width="${Math.max(Z.barH,bw*row.bar)}" height="${Z.barH}" rx="${Z.barH/2}" fill="${T.acc}"/>`);
+      }
+      const hasX = row.x!=null && xw;
+      tx(hasX?R-xw:R,yy,row.v,{s:row.big?Z.big:Z.fs,w:row.big||c.t==='ДЕНЬГИ'?600:400,m:true,a:'end',c:T[row.c||'txt']});
+      if(hasX) tx(R,yy,tight(row.x),{s:Z.xs,m:true,a:'end',c:T[row.xc||'mut']});
+    });
+  };
 
   // шапка
-  p.push(`<rect x="0" y="0" width="${W}" height="84" fill="${T.ink}"/>`);
-  p.push(`<rect x="0" y="80" width="${W}" height="3" fill="${T.acc}"/>`);
-  tx(P,42,'balance',{s:26,w:700});
-  p.push(`<circle cx="${P+102}" cy="37" r="4" fill="${T.acc}"/>`);
-  tx(P,64,`Отчёт ${per} · ${r.who}`,{s:13,c:T.mut});
-  tx(W-P,42,dt,{s:13,c:T.mut,a:'end'});
-  let y=100;
+  p.push(`<rect x="0" y="0" width="${W}" height="${Z.hd}" fill="${T.ink}"/>`);
+  p.push(`<rect x="0" y="${Z.hd-4}" width="${W}" height="${wide?3:4}" fill="${T.acc}"/>`);
+  tx(P,wide?42:52,'balance',{s:Z.logo,w:700});
+  p.push(`<circle cx="${wide?P+102:150}" cy="${wide?37:46}" r="${wide?4:5}" fill="${T.acc}"/>`);
+  tx(P,wide?64:82,`Отчёт ${per} · ${r.who}`,{s:Z.sub,c:T.mut});
+  tx(W-P,wide?42:52,dt,{s:Z.sub,c:T.mut,a:'end'});
+  let y = wide ? 100 : 144;
 
   // три главных числа
-  const big=[[r.touches,'касаний',T.acc],
-             [r.rate==null?'—':r.rate+'%','дозвон',r.rate>=40?T.acc:T.warn],
-             [r.dmLeads,'вышли на ЛПР',T.txt]];
   const bw=(W-2*P-2*G)/3;
-  big.forEach(([v,l,c],i)=>{
+  r.tiles.forEach(([v,l,c],i)=>{
     const x=P+i*(bw+G);
-    box(x,y,bw,78);
-    tx(x+bw/2,y+42,v,{s:30,w:600,c,a:'middle',m:true});
-    tx(x+bw/2,y+64,l,{s:12,c:T.mut,a:'middle'});
+    box(x,y,bw,Z.tileH);
+    tx(x+bw/2,y+(wide?42:56),v,{s:Z.tileV,w:600,c:T[c],a:'middle',m:true});
+    tx(x+bw/2,y+(wide?64:82),l,{s:Z.tileL,c:T.mut,a:'middle'});
   });
-  y+=78+10;
-  if(r.planLine){ tx(P,y+6,r.planLine,{s:12,c:T.mut,m:true}); y+=20; }
-  y+=6;
+  y+=Z.tileH+(wide?10:20);
+  if(r.planLine){ tx(P,y+(wide?6:6),r.planLine,{s:wide?12:14,c:T.mut,m:true}); y+=wide?20:26; }
+  y+=wide?6:0;
 
-  // левый столбец: каналы; правый: воронка с раскладкой по уровню контакта
-  const ch=[['Звонки',r.call],['WhatsApp',r.wa],['Instagram',r.ig],['Встречи',r.meet]];
-  const fn=[[STATUS.contacted,r.contacted,r.levels?.contacted],[STATUS.brief_done,r.brief,r.levels?.brief],
-            [STATUS.proposal_sent,r.proposal,r.levels?.proposal],[STATUS.negotiation,r.nego,r.levels?.nego],
-            ['Продано',r.won,r.levels?.won],['Отказ',r.lost,r.levels?.lost]];
-  const rowH=27, blockH=44+fn.length*rowH+6;
-  const xL=P, xR=P+CW+G;
-  box(xL,y,CW,blockH); head(xL,y,'КАНАЛЫ');
-  const max=Math.max(1,...ch.map(c=>c[1]));
-  ch.forEach(([l,v],i)=>{
-    const yy=y+44+i*rowH+16;
-    tx(xL+20,yy,l,{s:13.5});
-    const bx=xL+112, bw2=CW-112-56;
-    p.push(`<rect x="${bx}" y="${yy-11}" width="${bw2}" height="12" rx="6" fill="${T.line}"/>`);
-    if(v) p.push(`<rect x="${bx}" y="${yy-11}" width="${Math.max(12,bw2*v/max)}" height="12" rx="6" fill="${T.acc}"/>`);
-    tx(xL+CW-20,yy,v,{s:13.5,m:true,a:'end',c:v?T.txt:T.dim});
-  });
-  box(xR,y,CW,blockH); head(xR,y,'ВОРОНКА','соб · упр · адм · никто');
-  fn.forEach(([l,v,lv],i)=>{
-    const yy=y+44+i*rowH+16;
-    const c = l==='Продано'&&v ? T.acc : l==='Отказ'&&v ? T.bad : T.txt;
-    tx(xR+20,yy,l,{s:13.5,c:T.mut});
-    tx(xR+CW-88,yy,v,{s:15,w:600,m:true,a:'end',c:v?c:T.dim});
-    if(lv) tx(xR+CW-20,yy,`${lv.owner}·${lv.manager}·${lv.admin}·${lv.none}`,{s:11.5,m:true,a:'end',c:v?T.mut:T.dim});
-  });
-  y+=blockH+G;
-
-  // левый: конверсия по лидам; правый: деньги
-  const cv=r.conv||[];
-  const mo=[['Поступило за период',nf(r.cash)+' ₽',r.cash?T.acc:T.dim],
-            ['Продано, внедрение',nf(r.setupSum)+' ₽',r.setupSum?T.acc:T.dim],
-            ['Продано, подписка',nf(r.mrrSum)+' ₽/мес',r.mrrSum?T.acc:T.dim],
-            ['Собрано всего',nf(r.cashTotal)+' ₽',T.txt],
-            ['В работе, подписка',nf(r.pipeline)+' ₽/мес',T.txt]];
-  const block2H=44+Math.max(cv.length,mo.length)*rowH+6;
-  box(xL,y,CW,block2H); head(xL,y,'КОНВЕРСИЯ ПО ЛИДАМ',`демо ${r.demos?.general||0} общ · ${r.demos?.custom||0} инд`);
-  cv.forEach(([l,v],i)=>{
-    const yy=y+44+i*rowH+16, prev=i?cv[i-1][1]:0;
-    const pct = i && prev ? Math.round(v/prev*100)+'%' : '';
-    tx(xL+20,yy,l,{s:13.5});
-    tx(xL+CW-70,yy,v,{s:13.5,m:true,a:'end',c:v?T.txt:T.dim});
-    tx(xL+CW-20,yy,pct,{s:12,m:true,a:'end',c:!pct?T.dim:v/prev>=0.5?T.acc:T.warn});
-  });
-  box(xR,y,CW,block2H); head(xR,y,'ДЕНЬГИ');
-  mo.forEach(([l,v,c],i)=>{
-    const yy=y+44+i*rowH+16;
-    tx(xR+20,yy,l,{s:13,c:T.mut});
-    tx(xR+CW-20,yy,v,{s:13.5,w:600,m:true,a:'end',c});
-  });
-  y+=block2H+G;
-
-  // причины отказов
-  const reasons=Object.entries(r.lostBy);
-  if(reasons.length){
-    const rH=44+reasons.length*rowH+6;
-    box(P,y,W-2*P,rH); tx(P+20,y+26,'ПОЧЕМУ ОТКАЗАЛИ',{s:11,w:600,c:T.mut,ls:'1.2'});
-    reasons.forEach(([k,v],i)=>{
-      const yy=y+44+i*rowH+16;
-      tx(P+20,yy,LOST[k]||k,{s:13.5});
-      tx(W-P-20,yy,v,{s:13.5,m:true,a:'end',c:T.bad});
-    });
-    y+=rH+G;
+  const cards=reportCards(r);
+  if(wide){
+    const CW=(W-2*P-G)/2;
+    for(let i=0;i<cards.length;i+=2){
+      const a=cards[i], b=cards[i+1];
+      if(!b){ const h=cardH(a); card(a,P,y,W-2*P,h); y+=h+G; break; }
+      const h=Math.max(cardH(a),cardH(b));
+      card(a,P,y,CW,h); card(b,P+CW+G,y,CW,h); y+=h+G;
+    }
+  } else {
+    cards.forEach(c=>{ const h=cardH(c); card(c,P,y,W-2*P,h); y+=h+16; });
   }
 
-  tx(W/2,y+14,`Разговоров с ЛПР: ${r.dmTouch} · воронка: собственник · управляющий · администратор · без разговора · сформировано ${
-    new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`,
-    {s:11.5,c:T.dim,a:'middle'});
-  y+=36;
+  const foot=[r.showLv?`Разговоров с ЛПР: ${r.dmTouch}`:'',
+    r.off.length?`форма не собирает: ${r.off.join(', ')}`:'',
+    `сформировано ${new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`].filter(Boolean).join(' · ');
+  tx(W/2,y+(wide?14:18),foot,{s:wide?11.5:13,c:T.dim,a:'middle'});
+  y+=wide?36:44;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}">
     <rect width="${W}" height="${y}" fill="${T.ink}"/>${p.join('')}</svg>`;
@@ -3328,9 +3344,7 @@ function workedList(r){
   if(!r.worked.length) return `<div class="empty"><div class="big">∅</div>
     <p>Касаний ${PERIOD_NAME[S.period]} не было</p>
     <p class="hint">Запиши касание в карточке лида — лид появится здесь</p></div>`;
-  const n=r.worked.length;
-  return `<p class="note" style="margin:0 0 10px">${n} ${plural(n,'лид','лида','лидов')} · ${
-    r.touches} ${plural(r.touches,'касание','касания','касаний')} · разговоров ${r.answered} из ${r.attempts}</p>`
+  return `<p class="note" style="margin:0 0 10px">${esc(r.sumLine)}</p>`
     + r.worked.map(w=>workedRow(w,r)).join('');
 }
 
@@ -3340,8 +3354,7 @@ function workedList(r){
 function reportText(r){
   const L=[`Касания ${PERIOD_NAME[S.period]} — ${r.who}`,
     new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}),
-    `${r.worked.length} ${plural(r.worked.length,'лид','лида','лидов')} · ${
-      r.touches} ${plural(r.touches,'касание','касания','касаний')} · разговоров ${r.answered} из ${r.attempts}`,
+    r.sumLine,
     ''];
   if(!r.worked.length) return L.join('\n')+'Касаний не было.';
   r.worked.forEach(w=>{
@@ -3352,7 +3365,9 @@ function reportText(r){
       const t=new Date(a.created_at).toLocaleString('ru-RU',
         {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
       if(a.channel==='system'){
-        L.push(`   ${t}  этап: ${STATUS[a.status_from]||'—'} → ${STATUS[a.status_to]||a.status_to}`);
+        // Отметка оплаты этап не меняет — пишем её текстом, а не «Клиент → Клиент»
+        L.push(a.status_from===a.status_to ? `   ${t}  ${a.comment||'отметка'}`
+          : `   ${t}  этап: ${STATUS[a.status_from]||'—'} → ${STATUS[a.status_to]||a.status_to}`);
       }else{
         const au = r.showAuthor ? ' · '+(r.nameById[a.author_id]||'—') : '';
         L.push(`   ${t}  ${touchTitle(a)}${au}`);
@@ -3378,7 +3393,8 @@ function reportScreen(){
       ${S.staff.filter(u=>u.active).map(u=>`<button class="chip ${S.repWho===u.id?'on':''}" data-w="${u.id}">${
         esc(u.name)}</button>`).join('')}</div>`:''}
   </div>`;
-  if(S.busy||!S.report) return head+chips+`<div class="spin"></div>`;
+  // Отчёт из кэша прошлой версии без новых полей не рисуем: свежий уже грузится
+  if(S.busy||!S.report?.tiles) return head+chips+`<div class="spin"></div>`;
   const body = S.repTab==='work'
     ? workedList(S.report)
     : S.repTab==='log'
@@ -3709,6 +3725,9 @@ function bind(){
   };
 
   const touch=document.querySelector('[data-touch]'); if(touch) touch.onclick=touchSheet;
+  // Через что связался из карточки — касание откроется с этим каналом
+  document.querySelectorAll('[data-reach]').forEach(a=>a.addEventListener('click',()=>{
+    if(S.lead && a.getAttribute('href')) LS.set('reach',{lead:S.lead.id, ch:a.dataset.reach, at:Date.now()}); }));
   document.querySelectorAll('[data-draft-lead]').forEach(b=>b.onclick=async()=>{
     const id=b.dataset.draftLead; await openLead(id);
     if(S.view==='lead' && S.lead?.id===id) touchSheet(); });
