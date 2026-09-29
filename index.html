@@ -8,19 +8,25 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Даима">
 <link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="icon" href="./daima.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" sizes="180x180" href="./daima-180.png">
 <title>Даима · CRM</title>
 <style>
 /* ============ ШРИФТЫ ============ */
-/* Фирменные шрифты Даима лежат рядом в fonts/ и кэшируются service worker'ом:
-   приложение открывается без сети и без внешних запросов. Лицензия OFL. */
-@font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
-  src:url(./fonts/golos-text-cyrillic.woff2) format("woff2");
+/* IBM Plex Sans — весь текст и цифры. Кириллицу рисовала студия CSTM Fonts,
+   цифры в шрифте одной ширины: суммы и телефоны встают столбиком без моноширинного
+   шрифта. Файлы лежат рядом в fonts/ и кэшируются service worker'ом: приложение
+   открывается без сети и без внешних запросов. Лицензия OFL. */
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400 700;font-display:swap;
+  src:url(./fonts/ibm-plex-sans-cyrillic.woff2) format("woff2");
   unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
-@font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
-  src:url(./fonts/golos-text-latin.woff2) format("woff2");
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400 700;font-display:swap;
+  src:url(./fonts/ibm-plex-sans-latin.woff2) format("woff2");
   unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+/* Знак рубля живёт в расширенной латинице — файл грузится, только когда на экране есть ₽ */
+@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400 700;font-display:swap;
+  src:url(./fonts/ibm-plex-sans-latin-ext.woff2) format("woff2");
+  unicode-range:U+20BD}
 /* Unbounded — только написание имени «Даима», поэтому одна кириллица */
 @font-face{font-family:"Unbounded";font-style:normal;font-weight:400 900;font-display:swap;
   src:url(./fonts/unbounded-cyrillic.woff2) format("woff2");
@@ -37,16 +43,18 @@
   --accent:#18E08C; --accent-ink:#14181A; --accent-fg:#0A8452;
   --danger:#D93025; --warn:#A15C00;
   --r:14px; --tap:48px;
-  --sans:"Golos Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
-  --brand:"Unbounded","Golos Text",-apple-system,BlinkMacSystemFont,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --brand:"Unbounded","IBM Plex Sans",-apple-system,BlinkMacSystemFont,sans-serif;
+  /* Цифры — тем же шрифтом: в Plex они одной ширины и так читаются столбиком.
+     Моноширинный шрифт делал экран похожим на консоль */
+  --mono:var(--sans);
   color-scheme:light;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
 body{
   background:var(--ink);color:var(--text);font-family:var(--sans);
-  font-size:16px;line-height:1.45;overscroll-behavior-y:contain;
+  font-size:16px;line-height:1.45;overscroll-behavior-y:contain;font-variant-numeric:tabular-nums;
 }
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;background:none}
@@ -341,8 +349,33 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .notice .go{margin-left:auto;color:var(--warn);font-weight:700;white-space:nowrap}
 
 /* ============ ОТЧЁТ ============ */
-#rep{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--ink);max-width:760px;margin:0 auto}
-#rep svg{display:block;width:100%;height:auto}
+/* Главные числа и строки блоков — кнопки: ведут в «Лиды» с выборкой из отчёта */
+.rtiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.rtile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px 6px 10px;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:84px;justify-content:center}
+.rtile b{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.1;white-space:nowrap}
+.rtile span{font-size:12px;color:var(--muted);line-height:1.25}
+.rtile:not([disabled]):active,.rrow:not([disabled]):active{background:var(--raised)}
+.rcard{padding:12px 14px 4px}
+.rcard h3{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.rcard h3 i{font-style:normal;text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim);white-space:nowrap}
+.rrow{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:6px 0;
+  border-top:1px solid var(--line);text-align:left;font-size:15px}
+.rrow .rl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rrow .rb{flex:0 0 28%;height:8px;border-radius:4px;background:var(--raised);overflow:hidden}
+.rrow .rb i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.rrow .rv{font-weight:600;text-align:right;white-space:nowrap}
+.rrow .rv.big{font-size:17px}
+.rrow .rx{font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap;min-width:44px}
+.rrow .ra{flex:0 0 10px;color:var(--dim);font-size:19px;line-height:1}
+.rrow[disabled] .ra{visibility:hidden}
+.rtile[disabled],.rrow[disabled]{cursor:default}
+.c-acc{color:var(--accent-fg)} .c-bad{color:var(--danger)} .c-warn{color:var(--warn)}
+.c-dim{color:var(--dim)} .c-mut{color:var(--muted)}
+@media (min-width:900px){ .rgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;align-items:start} }
+/* Выборка из отчёта в «Лидах»: чип с подписью и крестиком */
+.chip.from{display:flex;align-items:center;gap:8px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.chip.from b{font-weight:400;opacity:.7}
 
 /* ============ НАСТРОЙКИ ============ */
 [hidden]{display:none!important}
@@ -493,7 +526,7 @@ const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
             scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null, segments:[],
             stages:STAGES_DEF, lostReasons:LOST_DEF, touchCfg:TOUCH_DEF, dictsLive:false,
             channels:CHANNELS_DEF, chanLive:false,
-            pick:null, qFocus:false };
+            pick:null, qFocus:false, sel:null, repCfg:null };
 
 // Справочники из базы раскладываем по привычным объектам STATUS и LOST:
 // подписи в карточке, списке, отчёте и выгрузке меняются вместе с настройками.
@@ -533,14 +566,15 @@ async function loadDicts(){
   const [st, lr, cfg, ch] = await Promise.all([
     safe('stages?select=*&order=sort_order,title'),
     safe('lost_reasons?select=*&order=sort_order,title'),
-    safe('app_settings?key=eq.touch_form&select=value'),
+    safe('app_settings?key=in.(touch_form,report)&select=key,value'),
     safe('channels?select=*&order=sort_order,title') ]);
   S.dictsLive = !!st;
   S.chanLive = !!ch;
   S.stages = st?.length ? st : STAGES_DEF;
   S.lostReasons = lr?.length ? lr : LOST_DEF;
   S.channels = ch?.length ? ch : CHANNELS_DEF;
-  S.touchCfg = touchCfg(cfg?.[0]?.value);
+  S.touchCfg = touchCfg(cfg?.find(x=>x.key==='touch_form')?.value);
+  S.repCfg = repCfg(cfg?.find(x=>x.key==='report')?.value);
   applyDicts();
 }
 const stageOf = code => S.stages.find(s=>s.code===code);
@@ -820,7 +854,7 @@ async function boot(){
       if(cached.stages?.length) S.stages=cached.stages;
       if(cached.lostReasons?.length) S.lostReasons=cached.lostReasons;
       if(cached.channels?.length) S.channels=cached.channels;
-      S.touchCfg=touchCfg(cached.touchCfg); applyDicts();
+      S.touchCfg=touchCfg(cached.touchCfg); S.repCfg=repCfg(cached.repCfg); applyDicts();
       // Без связи показываем сохранённый экран «Сегодня», а не пустоту
       restoreCache(); const t0=CACHE.get('today'); if(t0){ applyPatch('today', t0); S.curKey='today'; }
       toast('Нет связи. Показываю сохранённое, касания встанут в очередь');
@@ -832,7 +866,7 @@ async function boot(){
 
 function saveBoot(){
   LS.set('boot', {prof:S.prof, tariffs:S.tariffs, staff:S.staff, segments:S.segments,
-    stages:S.stages, lostReasons:S.lostReasons, touchCfg:S.touchCfg, channels:S.channels});
+    stages:S.stages, lostReasons:S.lostReasons, touchCfg:S.touchCfg, repCfg:S.repCfg, channels:S.channels});
 }
 
 // Данные экрана одним объектом, без записи в S: пока ответ идёт, человек может уйти
@@ -882,6 +916,15 @@ async function fetchView(v){
     else if(S.own==='none') f += `&owner_id=is.null`;
     if(S.q) groups.push(searchGroup(S.q));
     if(groups.length) f += `&and=${encodeURIComponent('('+groups.join(',')+')')}`;
+    if(S.sel){
+      // Выборка из отчёта: лиды по списку, частями по 50 — длинный адрес может не пройти прокси.
+      // Фильтры и поиск сверху сужают выборку, как и весь список.
+      const parts=[];
+      for(let i=0;i<S.sel.ids.length;i+=50) parts.push(S.sel.ids.slice(i,i+50));
+      const got=(await Promise.all(parts.map(ids=>db(`v_leads?select=*${f}&id=in.(${ids.join(',')})`)))).flat();
+      got.sort((a,b)=>(b.score||0)-(a.score||0) || String(a.company_name).localeCompare(String(b.company_name),'ru'));
+      return { data:got };
+    }
     return { data: await db(`v_leads?select=*${f}&order=score.desc,company_name.asc`) };
   }
   return {};
@@ -897,7 +940,7 @@ let NAV = 0;                   // номер перехода: ответ ста
 const MAIN_TABS = ['today','list','more','team','learn'];
 
 function viewKey(v=S.view){
-  if(v==='list') return `list|${S.filter}|${S.own}|${S.q}`;
+  if(v==='list') return `list|${S.filter}|${S.own}|${S.q}${S.sel?'|sel:'+S.sel.k:''}`;
   if(v==='report') return `report|${S.period}|${S.repWho}`;
   if(v==='person') return `person|${S.person?.id}`;
   if(v==='lead') return `lead|${S.lead?.id}`;
@@ -957,7 +1000,7 @@ function findLeadRow(id){
 // Тот же стек обслуживает и системный жест «назад».
 function pushScreen(){
   S.back.push({view:S.view, leadId:S.lead?.id, personId:S.person?.id, lessonId:S.lesson?.id,
-               filter:S.filter, own:S.own, q:S.q});
+               filter:S.filter, own:S.own, q:S.q, sel:S.sel});
   try{ history.pushState({depth:S.back.length}, ''); }catch{}
 }
 
@@ -968,7 +1011,7 @@ async function popScreen(){
   if(prev.view==='lead' && prev.leadId) return openLead(prev.leadId, false);
   if(prev.view==='person' && prev.personId) S.person = S.staff.find(u=>u.id===prev.personId) || S.person;
   if(prev.view==='lesson' && prev.lessonId) S.lesson = S.lessons.find(l=>l.id===prev.lessonId) || S.lesson;
-  S.filter=prev.filter; S.own=prev.own; S.q=prev.q;
+  S.filter=prev.filter; S.own=prev.own; S.q=prev.q; S.sel=prev.sel||null;
   return go(prev.view, false);
 }
 
@@ -1028,9 +1071,11 @@ async function nextLead(){
   }catch(e){ toast(e.message,true); }
 }
 
-async function go(v, push=true){
-  // Переход на любую основную вкладку сбрасывает стек: возвращаться некуда
-  if(MAIN_TABS.includes(v)) S.back.length=0;
+async function go(v, push=true, keep=false){
+  // Переход на основную вкладку с другого экрана сбрасывает стек: возвращаться некуда.
+  // Смена фильтра на той же вкладке стек не трогает: из «Лидов» по выборке отчёта
+  // «назад» ведёт в отчёт, сколько фильтров ни переключи.
+  if(MAIN_TABS.includes(v) && v!==S.view && !keep) S.back.length=0;
   else if(push && v!==S.view) pushScreen();
   if(v!=='list'){ S.qFocus=false; S.pick=null; }
   rememberScroll();
@@ -1155,14 +1200,14 @@ function savePlace(){
   const top=SHEETS.at(-1);
   LS.set('place', { who:S.prof.id, at:Date.now(), view:S.view, leadId:S.lead?.id||null,
     personId:S.person?.id||null, lessonId:S.lesson?.id||null, editingId:S.editing?.id||null,
-    filter:S.filter, own:S.own, q:S.q, period:S.period, repTab:S.repTab, repWho:S.repWho,
+    filter:S.filter, own:S.own, q:S.q, period:S.period, repTab:S.repTab, repWho:S.repWho, sel:S.sel,
     back:S.back, sheet:top?.name||null, sheetArg:top?.arg||null, scroll:{...SCROLL, [S.curKey]:window.scrollY} });
 }
 async function restorePlace(){
   const p=LS.get('place');
   if(!p || p.who!==S.prof.id || Date.now()-p.at>12*3600e3) return go('today');
   Object.assign(S, { filter:p.filter||'all', own:p.own||'mine', q:p.q||'', period:p.period||'today',
-    repTab:p.repTab||'sum', repWho:p.repWho||'all' });
+    repTab:p.repTab||'sum', repWho:p.repWho||'all', sel:p.sel?.ids ? p.sel : null });
   Object.assign(SCROLL, p.scroll||{});
   S.back = Array.isArray(p.back) ? p.back : [];
   // Записи в истории браузера после перезапуска пропали — возвращаем, чтобы «назад» работал
@@ -1418,8 +1463,13 @@ function listScreen(){
   const f=[['all','Все'],['open','В работе'],
     ...S.stages.filter(s=>s.active||s.code===S.filter).map(s=>[s.code,s.title])];
   const o=[['mine','Мои'],['all','Все ответственные'],['none','Ничьи']];
-  const head=`<div class="topbar"><h1>Лиды<span class="sub">${S.data.length} записей</span></h1></div>
+  // Пришли из отчёта — стрелка назад в отчёт и чип выборки. Крестик снимает выборку
+  const back = S.back.length ? `<button class="back" data-back aria-label="Назад">‹</button>` : '';
+  const from = S.sel ? `<div class="chips"><button class="chip on from" id="sel_off">Из отчёта: ${esc(S.sel.t)}
+    <b>· ${S.sel.ids.length}</b> ✕</button></div>` : '';
+  const head=`<div class="topbar">${back}<h1>Лиды<span class="sub">${S.data.length} ${plural(S.data.length,'запись','записи','записей')}</span></h1></div>
   <div class="wrap" style="padding-bottom:0">
+    ${from}
     <input id="q" type="text" placeholder="Поиск: название, ЛПР, телефон" value="${esc(S.q)}" style="margin-bottom:12px">
     <div class="chips">${o.map(([k,v])=>
       `<button class="chip ${S.own===k?'on':''}" data-o="${k}">${v}</button>`).join('')}</div>
@@ -2610,6 +2660,9 @@ function settingsScreen(){
       <div class="chips" style="flex-wrap:wrap">${S.segments.map(s=>`<button class="chip" data-seg="${esc(s.name)}" style="${s.active?'':'opacity:.4;text-decoration:line-through'}">${esc(s.name)}</button>`).join('')}</div>
       <div class="two"><input id="seg_new" type="text" placeholder="Новый сегмент"><button class="btn ghost" id="seg_add" style="margin-top:0">Добавить</button></div>
       <p class="note">Нажатие выключает или включает сегмент. Скрипт с сегментом показывается только лидам этого сегмента.</p></div>
+    <div class="card"><h3>Отчёт</h3>
+      <p class="note" style="margin:0 0 4px">Главные числа, блоки и их порядок. Одна настройка на всю команду.</p>
+      <button class="btn ghost" id="rep_cfg">Настроить отчёт</button></div>
     <div class="card">
       <button class="link" data-nav="learn">Скрипты, возражения, уроки</button>
       <button class="link" data-nav="norms">Нормы плана и разгон</button>
@@ -3123,20 +3176,44 @@ const CALL_OUT = ['answered','no_answer','callback','refused'];
 const TALK_OUT = ['answered','refused'];
 const LV_RANK = { admin:1, manager:2, owner:3 };
 
+// Что показывать в отчёте — настройка админа (app_settings, ключ report), одна на всех.
+// Главных чисел до трёх; блоки в своём порядке, каждый можно выключить.
+// sync — «как в настройках»: только включённые этапы, каналы, причины отказа
+// и возражения. Выключенное из отчёта пропадает, даже если по нему были записи.
+const REP_TILES = { touches:'Касаний', calls:'Звонков', rate:'Дозвон', talks:'Разговоров',
+  dm:'Вышли на ЛПР', leads:'Лидов в работе', moved:'Сдвинули этап', won:'Новых клиентов', cash:'Поступило' };
+const REP_BLOCKS = { channels:'Каналы', funnel:'Движение по воронке', conv:'Докуда дошли лиды',
+  money:'Деньги', lost:'Почему отказали', objections:'Возражения' };
+const REPORT_DEF = { tiles:['touches','rate','dm'],
+  blocks:Object.keys(REP_BLOCKS).map(id=>({id, on:true})), sync:true };
+function repCfg(raw){
+  const c=raw&&typeof raw==='object'?raw:{};
+  const tiles=[...new Set((Array.isArray(c.tiles)?c.tiles:REPORT_DEF.tiles).filter(t=>REP_TILES[t]))].slice(0,3);
+  const blocks=(Array.isArray(c.blocks)?c.blocks:[]).filter(b=>b&&REP_BLOCKS[b.id])
+    .map(b=>({id:b.id, on:b.on!==false}));
+  // Блок из новой версии появляется включённым в конце
+  REPORT_DEF.blocks.forEach(d=>{ if(!blocks.some(b=>b.id===d.id)) blocks.push({...d}); });
+  return { tiles:tiles.length?tiles:[...REPORT_DEF.tiles], blocks, sync:c.sync!==false };
+}
+
 async function loadReport(){
   const {from,to,kind}=periodRange(S.period);
   // Страницами (dbAll): за всё время, да и за месяц командой, журнал больше
   // 1000 строк, и Supabase молча отдал бы только первую тысячу.
   // Порядок с id — чтобы страницы не перекрывались на одинаковом времени.
   const span = kind==='all' ? '' : `created_at=gte.${from}&created_at=lt.${to}&`;
-  const [acts, leads, team, lvRows] = await Promise.all([
+  const cfg=S.repCfg||repCfg(), sync=cfg.sync;
+  const [acts, leads, team, lvRows, objs] = await Promise.all([
     dbAll(`activities?${span}select=*&order=created_at,id`),
     dbAll('v_leads?select=*&order=id'),
     isAdmin() ? db('v_team_today?select=*') : db('v_plan_today?select=*'),
     // Все разговоры с уровнем до конца периода: уровень лида на момент перехода
     // по этапу, а не сегодняшний. Иначе «Демо получил» у администратора
     // записывался собственнику, если до собственника дошли неделей позже.
-    dbAll(`activities?spoke_with=not.is.null&created_at=lt.${to}&select=id,lead_id,spoke_with,created_at&order=created_at,id`)
+    dbAll(`activities?spoke_with=not.is.null&created_at=lt.${to}&select=id,lead_id,spoke_with,created_at&order=created_at,id`),
+    // Возражения — справочник скриптов. Без миграции 10 таблицы нет: блок пустой
+    db('scripts?kind=eq.objection&select=id,title,active,sort_order&order=sort_order,title').catch(e=>{
+      if(isOffline(e)||e.auth) throw e; return []; })
   ]);
   // Строка плана только для «сегодня»: план задаётся на день
   let planLine=null;
@@ -3182,7 +3259,7 @@ async function loadReport(){
     .map(c=>({code:c.code, l:c.title, n:cnt(touches,a=>a.channel===c.code), active:c.active}));
   touches.forEach(a=>{ if(!chRows.some(c=>c.code===a.channel))
     chRows.push({code:a.channel, l:CHAN[a.channel]||a.channel, n:cnt(touches,x=>x.channel===a.channel), active:false}); });
-  const channels=chRows.filter(c=>c.active||c.n);
+  const channels=chRows.filter(c=>c.active||(!sync&&c.n));
   // Канал не выбирают — всё уходит в первый по списку, раскладка ничего не значит
   const showCh = on('channel') || channels.filter(c=>c.n).length>1;
 
@@ -3204,8 +3281,9 @@ async function loadReport(){
     const list = s.code==='won' ? won.map(l=>l.id) : s.code==='lost' ? lost.map(l=>l.id) : [...ids(moves,a=>a.status_to===s.code)];
     const lv={owner:0,manager:0,admin:0,none:0};
     list.forEach(id=>{ const m=moves.find(a=>a.lead_id===id && a.status_to===s.code); lv[m?levelAt(id,m.created_at):'none']++; });
-    return { l:s.title, n:list.length, lv, active:s.active, tone: s.code==='won'?'acc':s.code==='lost'?'bad':'txt' };
-  }).filter(x=>x.active||x.n);
+    return { code:s.code, l:s.title, n:list.length, ids:list, lv, active:s.active,
+      tone: s.code==='won'?'acc':s.code==='lost'?'bad':'txt' };
+  }).filter(x=>x.active||(!sync&&x.n));
 
   // Докуда дошли лиды периода. Когорта — лиды, которых касались или двигали за
   // период. Лид считается на шаге, если дошёл до него или дальше: текущий этап,
@@ -3221,26 +3299,31 @@ async function loadReport(){
     if(touches.some(a=>a.lead_id===id && a.demo)) k=Math.max(k, idx('brief_done'));
     far.set(id,k);
   });
-  const conv=[['В работе', cohort.size],
-    ...steps.map((s,i)=>[s.title, [...far.values()].filter(k=>k>=i).length, s.active])
-      .filter(([,n,act])=>act||n).map(([l,n])=>[l,n])];
+  const reachedStep=i=>[...far].filter(([,k])=>k>=i).map(([id])=>id);
+  const conv=[{l:'В работе', ids:[...cohort]},
+    ...steps.map((s,i)=>({l:s.title, ids:reachedStep(i), act:s.active}))
+      .filter(x=>x.act||(!sync&&x.ids.length))];
   const showDemo = on('demo') || touches.some(a=>a.demo);
   const demos={ general:cnt(touches,a=>a.demo==='general'), custom:cnt(touches,a=>a.demo==='custom') };
 
   // Поступило за период — по датам отметок об оплате
-  let cash=0;
+  let cash=0; const paidIds=[];
   leads.filter(leadMine).forEach(l=>{
     const inRange=d=>d && d>=from && d<to;
+    const c0=cash;
     if(inRange(l.paid_1_at)) cash+=l.stage1_amount||0;
     if(inRange(l.paid_2_at)) cash+=l.stage2_amount||0;
     if(inRange(l.paid_3_at)) cash+=l.stage3_amount||0;
+    if(cash>c0) paidIds.push(l.id);
   });
   const cashTotal=leads.filter(leadMine).reduce((s,l)=>s+(l.paid_total||0),0);
 
   // Причины отказа в порядке справочника
   const lostBy=[];
-  lost.forEach(l=>{ if(!l.lost_reason) return; const x=lostBy.find(r=>r[0]===l.lost_reason);
-    if(x) x[1]++; else lostBy.push([l.lost_reason,1]); });
+  const reasonOn=code=>!sync || S.lostReasons.find(r=>r.code===code)?.active!==false;
+  lost.forEach(l=>{ if(!l.lost_reason || !reasonOn(l.lost_reason)) return;
+    const x=lostBy.find(r=>r[0]===l.lost_reason);
+    if(x){ x[1]++; x[2].push(l.id); } else lostBy.push([l.lost_reason,1,[l.id]]); });
   const rOrder=code=>{ const i=S.lostReasons.findIndex(r=>r.code===code); return i<0?999:i; };
   lostBy.sort((a,b)=>rOrder(a[0])-rOrder(b[0]));
 
@@ -3269,11 +3352,48 @@ async function loadReport(){
     `разговоров ${talks}`].filter(Boolean).join(' · ');
   const off=[!showCh&&'каналы', !showRate&&'дозвон', !showLv&&'ЛПР и уровень контакта'].filter(Boolean);
 
-  // Три главных числа. То, что форма не собирает, заменяется тем, что собирает
-  const tiles=[[touches.length,'касаний','acc']];
-  tiles.push(showRate ? [rate==null?'—':rate+'%','дозвон', rate==null?'dim':rate>=40?'acc':'warn']
-    : [ids(moves).size,'сдвинули этап','txt']);
-  tiles.push(showLv ? [dmLeads,'вышли на ЛПР','txt'] : [cohort.size,'лидов в работе','txt']);
+  // Возражения: сколько раз прозвучало за период и у каких лидов
+  const objections=objs.map(o=>{ const t=touches.filter(a=>a.objection_id===o.id);
+      return {id:o.id, l:o.title, n:t.length, ids:[...ids(t)], active:o.active}; })
+    .filter(o=>o.active||(!sync&&o.n));
+
+  // За каждым числом — список лидов: нажатие в отчёте открывает их в «Лидах».
+  // sel: ключ → {t: подпись фильтра, ids}. Подпись говорит, откуда выборка.
+  const tail=' · '+PERIOD_NAME[kind]+(who==='all'?'':' · '+(S.staff.find(u=>u.id===who)?.name||S.prof.name).split(' ')[0]);
+  const sel={};
+  const mk=(key,t,list)=>{ const a=[...new Set(list)]; if(!a.length) return null; sel[key]={t:t+tail, ids:a}; return key; };
+
+  // Главные числа из настройки. То, что форма не собирает, заменяется тем, что собирает
+  const nfT=n=>new Intl.NumberFormat('ru-RU').format(n||0);
+  const TILE={
+    touches:()=>[touches.length,'касаний','acc', mk('t:touches','Касались',ids(touches))],
+    calls:  ()=>[calls.length,'звонков','txt', mk('t:calls','Звонили',ids(calls))],
+    rate:   ()=>showRate && [rate==null?'—':rate+'%','дозвон', rate==null?'dim':rate>=40?'acc':'warn',
+                 mk('t:rate','Дозвонились',ids(calls,a=>a.outcome!=='no_answer'))],
+    talks:  ()=>showRate && [talks,'разговоров','txt', mk('t:talks','Разговаривали',ids(touches,a=>TALK_OUT.includes(a.outcome)))],
+    dm:     ()=>showLv && [dmLeads,'вышли на ЛПР','txt', mk('t:dm','Вышли на ЛПР',ids(touches,a=>a.with_dm))],
+    leads:  ()=>[cohort.size,'лидов в работе','txt', mk('t:leads','В работе',cohort)],
+    moved:  ()=>[ids(moves).size,'сдвинули этап','txt', mk('t:moved','Сдвинули этап',ids(moves))],
+    won:    ()=>[won.length,'новых клиентов', won.length?'acc':'txt', mk('t:won','Стали клиентами',won.map(l=>l.id))],
+    cash:   ()=>[nfT(cash)+' ₽','поступило', cash?'acc':'dim', mk('t:cash','Оплатили',paidIds)],
+  };
+  const tiles=[];
+  cfg.tiles.forEach(k=>{ const t=TILE[k](); if(t) tiles.push(t); });
+  for(const k of ['touches','moved','leads','calls','won']){
+    if(tiles.length>=cfg.tiles.length) break;
+    if(!cfg.tiles.includes(k)) tiles.push(TILE[k]());
+  }
+
+  // Выборки для строк блоков
+  channels.forEach(c=>{ c.sel=mk('ch:'+c.code, CHAN[c.code]||c.l, ids(touches,a=>a.channel===c.code)); });
+  funnel.forEach(f=>{ f.sel=mk('st:'+f.code, f.l, f.ids); });
+  conv.forEach((c,i)=>{ c.sel=mk('cv:'+i, i?'Дошли до «'+c.l+'»':'В работе', c.ids); });
+  objections.forEach(o=>{ o.sel=mk('ob:'+o.id, 'Возражение «'+o.l+'»', o.ids); });
+  const lostRows=lostBy.map(([k,n,list])=>({k, n, sel:mk('lr:'+k, 'Отказ: '+(LOST[k]||k), list)}));
+  const pipeLeads=leads.filter(l=>leadMine(l)&&stageOf(l.status)?.in_pipeline);
+  const moneySel={ cash:mk('m:cash','Оплатили',paidIds), sold:mk('m:sold','Стали клиентами',won.map(l=>l.id)),
+    total:mk('m:total','Платили за всё время',leads.filter(l=>leadMine(l)&&l.paid_total>0).map(l=>l.id)),
+    pipe:mk('m:pipe','В работе, подписка',pipeLeads.map(l=>l.id)) };
 
   return { report:{
     worked,
@@ -3284,12 +3404,12 @@ async function loadReport(){
     who: who==='all' ? 'вся команда' : (S.staff.find(u=>u.id===who)?.name || S.prof.name),
     touches:touches.length, calls:calls.length, reached, rate, talks, sumLine, off, tiles,
     channels: showCh ? channels : null, showLv, showRate, showDemo, funnel, conv, demos,
+    objections, lostRows, moneySel, sel, cfg,
     won:won.length, lost:lost.length,
     setupSum:won.reduce((s,l)=>s+(l.setup_amount||0),0),
     mrrSum:won.reduce((s,l)=>s+(l.mrr_amount||0),0),
     dmTouch, dmLeads, lostBy, cash, cashTotal, planLine,
-    pipeline:leads.filter(l=>leadMine(l)&&stageOf(l.status)?.in_pipeline)
-                  .reduce((s,l)=>s+(l.mrr_amount||0),0)
+    pipeline:pipeLeads.reduce((s,l)=>s+(l.mrr_amount||0),0)
   } };
 }
 
@@ -3297,33 +3417,62 @@ async function loadReport(){
 // процент) или полоска. Одна колонка и две колонки рисуют одно и то же.
 function reportCards(r){
   const nf=n=>new Intl.NumberFormat('ru-RU').format(n||0);
-  const cards=[];
-  if(r.channels){
-    const max=Math.max(1,...r.channels.map(c=>c.n));
-    cards.push({ t:'КАНАЛЫ', right: r.showRate&&r.calls ? `дозвон ${r.reached} из ${r.calls}` : '',
-      rows:r.channels.map(c=>({l:c.l, v:c.n, c:c.n?'txt':'dim', bar:c.n/max})) });
-  }
-  cards.push({ t:'ДВИЖЕНИЕ ПО ВОРОНКЕ', right: r.showLv ? 'соб · упр · адм · никто' : 'лидов', xw:'lv',
-    rows:r.funnel.map(f=>({l:f.l, lc:'mut', v:f.n, c:f.n?f.tone:'dim', big:true,
-      x: r.showLv ? `${f.lv.owner} · ${f.lv.manager} · ${f.lv.admin} · ${f.lv.none}` : null, xc:f.n?'mut':'dim'})) });
-  cards.push({ t:'ДОКУДА ДОШЛИ ЛИДЫ', xw:'pct',
-    right: r.showDemo ? `демо: общих ${r.demos.general} · индивид. ${r.demos.custom}` : '',
-    rows:r.conv.map(([l,v],i)=>{ const prev=i?r.conv[i-1][1]:0;
-      const pct = i && prev ? Math.round(v/prev*100) : null;
-      return {l, v, c:v?'txt':'dim', x:pct==null?'':pct+'%', xc:pct==null?'dim':pct>=50?'acc':'warn'}; }) });
-  cards.push({ t:'ДЕНЬГИ', rows:[
-    {l:'Поступило за период', lc:'mut', v:nf(r.cash)+' ₽', c:r.cash?'acc':'dim'},
-    {l:'Продано, внедрение', lc:'mut', v:nf(r.setupSum)+' ₽', c:r.setupSum?'acc':'dim'},
-    {l:'Продано, подписка', lc:'mut', v:nf(r.mrrSum)+' ₽/мес', c:r.mrrSum?'acc':'dim'},
-    {l:'Собрано всего', lc:'mut', v:nf(r.cashTotal)+' ₽', c:'txt'},
-    {l:'В работе, подписка', lc:'mut', v:nf(r.pipeline)+' ₽/мес', c:'txt'}] });
-  if(r.lostBy.length) cards.push({ t:'ПОЧЕМУ ОТКАЗАЛИ',
-    rows:r.lostBy.map(([k,v])=>({l:LOST[k]||k, v, c:'bad'})) });
-  return cards;
+  const cfg=r.cfg||repCfg();
+  const B={
+    channels:()=>{
+      if(!r.channels) return null;
+      const max=Math.max(1,...r.channels.map(c=>c.n));
+      return { t:'КАНАЛЫ', right: r.showRate&&r.calls ? `дозвон ${r.reached} из ${r.calls}` : '',
+        rows:r.channels.map(c=>({l:c.l, v:c.n, c:c.n?'txt':'dim', bar:c.n/max, sel:c.sel})) };
+    },
+    funnel:()=>({ t:'ДВИЖЕНИЕ ПО ВОРОНКЕ', right: r.showLv ? 'соб · упр · адм · никто' : 'лидов', xw:'lv',
+      rows:r.funnel.map(f=>({l:f.l, lc:'mut', v:f.n, c:f.n?f.tone:'dim', big:true, sel:f.sel,
+        x: r.showLv ? `${f.lv.owner} · ${f.lv.manager} · ${f.lv.admin} · ${f.lv.none}` : null, xc:f.n?'mut':'dim'})) }),
+    conv:()=>({ t:'ДОКУДА ДОШЛИ ЛИДЫ', xw:'pct',
+      right: r.showDemo ? `демо: общих ${r.demos.general} · индивид. ${r.demos.custom}` : '',
+      rows:r.conv.map((c,i)=>{ const v=c.ids.length, prev=i?r.conv[i-1].ids.length:0;
+        const pct = i && prev ? Math.round(v/prev*100) : null;
+        return {l:c.l, v, c:v?'txt':'dim', sel:c.sel, x:pct==null?'':pct+'%', xc:pct==null?'dim':pct>=50?'acc':'warn'}; }) }),
+    money:()=>({ t:'ДЕНЬГИ', rows:[
+      {l:'Поступило за период', lc:'mut', v:nf(r.cash)+' ₽', c:r.cash?'acc':'dim', sel:r.moneySel?.cash},
+      {l:'Продано, внедрение', lc:'mut', v:nf(r.setupSum)+' ₽', c:r.setupSum?'acc':'dim', sel:r.moneySel?.sold},
+      {l:'Продано, подписка', lc:'mut', v:nf(r.mrrSum)+' ₽/мес', c:r.mrrSum?'acc':'dim', sel:r.moneySel?.sold},
+      {l:'Собрано всего', lc:'mut', v:nf(r.cashTotal)+' ₽', c:'txt', sel:r.moneySel?.total},
+      {l:'В работе, подписка', lc:'mut', v:nf(r.pipeline)+' ₽/мес', c:'txt', sel:r.moneySel?.pipe}] }),
+    lost:()=>(r.lostRows||[]).length ? { t:'ПОЧЕМУ ОТКАЗАЛИ',
+      rows:r.lostRows.map(x=>({l:LOST[x.k]||x.k, v:x.n, c:'bad', sel:x.sel})) } : null,
+    // Пустой блок возражений не нужен: скриптов с возражениями нет или их не отмечают
+    objections:()=>(r.objections||[]).some(o=>o.n) ? { t:'ВОЗРАЖЕНИЯ', right:'раз',
+      rows:r.objections.map(o=>({l:o.l, v:o.n, c:o.n?'txt':'dim', sel:o.sel})) } : null,
+  };
+  return cfg.blocks.filter(b=>b.on).map(b=>B[b.id]()).filter(Boolean);
 }
 
 function reportSVG(r){ return reportDraw(r, false); }
-function reportSVGWide(r){ return reportDraw(r, true); }
+
+// Сводка на экране — обычная вёрстка, а не картинка: в картинке строка на телефоне
+// выходит 14 точек высотой, по ней не попасть пальцем. Картинка (reportSVG) остаётся
+// для «Сохранить» и «Отправить». Строка с лидами за числом нажимается и открывает
+// их в «Лидах» (openSel); без лидов — просто строка.
+function reportHTML(r){
+  const tone=c=>c?` c-${c}`:'';
+  const go=k=>k && r.sel?.[k] ? `data-sel="${esc(k)}"` : 'disabled';
+  const tiles=`<div class="rtiles">${r.tiles.map(([v,l,c,k])=>
+    `<button class="rtile" ${go(k)}><b class="${tone(c).trim()}">${esc(v)}</b><span>${esc(l)}</span></button>`).join('')}</div>`;
+  const plan = r.planLine ? `<p class="note" style="margin:0 0 12px">${esc(r.planLine)}</p>` : '';
+  const cards=reportCards(r).map(c=>{
+    const max=c.rows.some(x=>x.bar!=null);
+    return `<div class="card rcard"><h3><span>${esc(c.t)}</span>${c.right?`<i>${esc(c.right)}</i>`:''}</h3>${
+      c.rows.map(x=>`<button class="rrow" ${go(x.sel)}>
+        <span class="rl${tone(x.lc)}">${esc(x.l)}</span>
+        ${max?`<span class="rb"><i style="width:${x.v?Math.max(4,Math.round((x.bar||0)*100)):0}%"></i></span>`:''}
+        <span class="rv${tone(x.c)}${x.big?' big':''}">${esc(x.v)}</span>
+        ${x.x!=null&&x.x!==''?`<span class="rx${tone(x.xc)}">${esc(x.x)}</span>`:''}
+        <span class="ra" aria-hidden="true">›</span></button>`).join('')}</div>`; }).join('');
+  const foot=[r.showLv?`Разговоров с ЛПР: ${r.dmTouch}`:'',
+    r.off.length?`форма не собирает: ${r.off.join(', ')}`:''].filter(Boolean).join(' · ');
+  return tiles+plan+`<div class="rgrid">${cards}</div>`+(foot?`<p class="note" style="text-align:center">${esc(foot)}</p>`:'');
+}
 
 // Одна колонка: так отчёт читается на телефоне и уходит картинкой в мессенджер.
 // Широкий экран: те же блоки парами в два столбца, отчёт помещается в один экран.
@@ -3334,7 +3483,7 @@ function reportDraw(r, wide){
   const T={ink:'#FAFAF8',card:'#FFFFFF',line:'#E2E5E1',txt:'#14181A',mut:'#6E7A74',
            dim:'#7D8883',acc:'#18E08C',acct:'#0A8452',warn:'#A15C00',bad:'#D93025'};
   const F='-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif';
-  const M='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+  const M=F;
   const e=t=>String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const per=PERIOD_NAME[r.kind];
   const dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
@@ -3347,7 +3496,7 @@ function reportDraw(r, wide){
 
   const p=[];
   const box=(x,yy,w,h)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="${Z.rad}" fill="${T.card}" stroke="${T.line}"/>`);
-  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c===T.acc?T.acct:(o.c||T.txt)}" font-family="${o.m?M:F}" font-size="${o.s||Z.fs}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
+  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c===T.acc?T.acct:(o.c||T.txt)}" font-family="${o.m?M:F}" font-size="${o.s||Z.fs}" font-weight="${o.w||400}"${o.m?' style="font-variant-numeric:tabular-nums"':''}${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
   const cardH=c=>Z.top+c.rows.length*Z.step+Z.bottom;
   const card=(c,x,y,w,h)=>{
     box(x,y,w,h);
@@ -3388,7 +3537,7 @@ function reportDraw(r, wide){
   r.tiles.forEach(([v,l,c],i)=>{
     const x=P+i*(bw+G);
     box(x,y,bw,Z.tileH);
-    tx(x+bw/2,y+(wide?42:56),v,{s:Z.tileV,w:600,c:T[c],a:'middle',m:true});
+    tx(x+bw/2,y+(wide?42:56),v,{s:String(v).length>7?Z.tileV*0.68:Z.tileV,w:600,c:T[c],a:'middle',m:true});
     tx(x+bw/2,y+(wide?64:82),l,{s:Z.tileL,c:T.mut,a:'middle'});
   });
   y+=Z.tileH+(wide?10:20);
@@ -3518,11 +3667,82 @@ function reportScreen(){
        <button class="btn" id="copy_txt">Скопировать текст</button>
        <button class="btn ghost" id="share_txt">Отправить</button>
        <p class="note">Этапы, исходы и комментарии подряд — чтобы перечитать день целиком.</p>`
-    : `<div id="rep">${(window.innerWidth>=900?reportSVGWide:reportSVG)(S.report)}</div>
+    : `${reportHTML(S.report)}
+       <p class="note" style="margin:0 0 4px">Нажми на число или строку — откроются эти лиды.</p>
        <button class="btn" id="save_png">Сохранить картинкой</button>
        <button class="btn ghost" id="share_png">Отправить</button>
+       ${isAdmin()?`<button class="btn ghost" id="rep_cfg">Настроить отчёт</button>`:''}
        <p class="note">Картинка 760 пикселей шириной — читается в мессенджере без открытия.</p>`;
   return head+chips+`<div class="wrap" style="padding-top:4px">${body}</div>`;
+}
+
+// Настройка отчёта: какие главные числа, какие блоки и в каком порядке, показывать ли
+// выключенное в настройках. Одна на всю команду, правит админ (app_settings, report).
+function reportCfgSheet(){
+  const cfg=JSON.parse(JSON.stringify(S.repCfg||repCfg()));
+  const d=document.createElement('div'); d.className='sheet';
+  const tilesHTML=()=>Object.entries(REP_TILES).map(([k,v])=>{ const i=cfg.tiles.indexOf(k);
+    return `<button class="chip ${i>=0?'on':''}" data-rt-tile="${k}">${i>=0?(i+1)+' · ':''}${esc(v)}</button>`; }).join('');
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 6px;font-size:19px">Отчёт</h2>
+    <p class="note" style="margin:0 0 4px">Одна настройка на всю команду: менеджеры видят отчёт таким же.</p>
+    <label>Главные числа — до трёх, по порядку нажатия</label>
+    <div class="chips" id="rc_tiles" style="flex-wrap:wrap">${tilesHTML()}</div>
+    <p class="note" style="margin:0">Дозвон и разговоры считаются, если форма касания собирает «Чем закончилось»,
+      ЛПР — если собирает «Говорил с». Иначе на их месте встанет другое число.</p>
+    <label>Блоки — галочка показывает, ≡ меняет порядок</label>
+    <div class="dlist" id="rc_blocks">${cfg.blocks.map(b=>`<div class="drow ${b.on?'':'off'}" data-code="${b.id}">
+      <span class="drag" aria-label="Перетащить">≡</span>
+      <label class="check" style="flex:1;margin:0"><input type="checkbox" data-rc-on="${b.id}" ${b.on?'checked':''}>${esc(REP_BLOCKS[b.id])}</label>
+      </div>`).join('')}</div>
+    <label class="check" style="margin-top:12px;align-items:flex-start"><input type="checkbox" id="rc_sync" ${cfg.sync?'checked':''}>
+      <span>Как в настройках<span class="note" style="display:block;margin:2px 0 0">Только включённые этапы, каналы, причины
+      отказа и возражения. Сними галочку, чтобы видеть и выключенные, если по ним были записи.</span></span></label>
+    <button class="btn ghost" id="rc_reset">Вернуть стандартный</button>
+    <div class="sfoot"><button class="btn ghost" id="rc_cancel">Отмена</button><button class="btn" id="rc_save">Сохранить</button></div>
+  </div>`;
+  const before=JSON.stringify(cfg);
+  openSheet(d, {name:'repcfg', dirty:()=>JSON.stringify(cfg)!==before});
+  const $$=q=>d.querySelector(q);
+  const bindTiles=()=>$$('#rc_tiles').querySelectorAll('[data-rt-tile]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.rtTile, i=cfg.tiles.indexOf(k);
+    if(i>=0){ if(cfg.tiles.length===1) return toast('Хотя бы одно число',true); cfg.tiles.splice(i,1); }
+    else { if(cfg.tiles.length>=3) return toast('Не больше трёх: сними одно',true); cfg.tiles.push(k); }
+    $$('#rc_tiles').innerHTML=tilesHTML(); bindTiles();
+  });
+  bindTiles();
+  d.querySelectorAll('[data-rc-on]').forEach(i=>i.onchange=()=>{
+    cfg.blocks.find(b=>b.id===i.dataset.rcOn).on=i.checked;
+    i.closest('.drow').classList.toggle('off', !i.checked);
+  });
+  initSort($$('#rc_blocks'), codes=>{ cfg.blocks=codes.map(id=>cfg.blocks.find(b=>b.id===id)); });
+  $$('#rc_sync').onchange=e=>{ cfg.sync=e.target.checked; };
+  $$('#rc_cancel').onclick=()=>closeSheet(d);
+  const save=async(c)=>{
+    const btn=$$('#rc_save'); btn.disabled=true;
+    try{
+      await db('app_settings?on_conflict=key',{method:'POST',prefer:'return=minimal,resolution=merge-duplicates',
+        body:JSON.stringify({key:'report', value:c})});
+      S.repCfg=repCfg(c); saveBoot();
+      // Отчёты за другие периоды посчитаны по старой настройке
+      [...CACHE.keys()].filter(k=>k.startsWith('report|')).forEach(k=>CACHE.delete(k));
+      closeSheet(d); toast('Отчёт настроен');
+      if(S.view==='report') go('report', false);
+    }catch(e){ toast(/row-level|permission/i.test(e.message)?'Настраивает только админ':e.message, true); btn.disabled=false; }
+  };
+  $$('#rc_save').onclick=()=>save(cfg);
+  $$('#rc_reset').onclick=()=>save(JSON.parse(JSON.stringify(REPORT_DEF)));
+}
+
+// Число в отчёте → «Лиды» с этими лидами. Фильтры списка сброшены, чтобы в списке
+// было ровно столько, сколько в отчёте; дальше их можно включать поверх выборки.
+// «Назад» возвращает в отчёт на то же место.
+function openSel(key){
+  const x=S.report?.sel?.[key]; if(!x) return;
+  pushScreen();
+  S.sel={t:x.t, ids:x.ids, k:key+'|'+Date.now().toString(36)};
+  S.filter='all'; S.own='all'; S.q='';
+  go('list', false, true);
 }
 
 // SVG → PNG прямо в браузере, без сторонних библиотек
@@ -3566,6 +3786,9 @@ function navBar(){
 function bind(){
   document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{
     if(b.dataset.nav==='add') S.editing=null;
+    // Вкладка «Лиды» из меню — обычный список, без выборки из отчёта
+    if(b.dataset.nav==='list') S.sel=null;
+    if(MAIN_TABS.includes(b.dataset.nav)) S.back.length=0;
     go(b.dataset.nav);
   });
   document.querySelectorAll('[data-lead]').forEach(b=>b.onclick=()=>openLead(b.dataset.lead));
@@ -3579,6 +3802,11 @@ function bind(){
   document.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{ S.repWho=b.dataset.w; go('report',false); });
   // Вкладка отчёта считается из уже загруженных данных: перезапрашивать нечего
   document.querySelectorAll('[data-rt]').forEach(b=>b.onclick=()=>{ S.repTab=b.dataset.rt; render(); });
+  document.querySelectorAll('[data-sel]').forEach(b=>b.onclick=()=>openSel(b.dataset.sel));
+  const selOff=document.getElementById('sel_off');
+  if(selOff) selOff.onclick=()=>{ S.sel=null; go('list'); };
+  const rcf=document.getElementById('rep_cfg');
+  if(rcf) rcf.onclick=()=>reportCfgSheet();
   document.querySelectorAll('[data-worked]').forEach(b=>b.onclick=()=>{
     S.period='today'; S.repTab='work'; go('report'); });
 
