@@ -8,8 +8,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Даима">
 <link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./daima.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" sizes="180x180" href="./daima-180.png">
+<!-- Иконки только PNG: SVG iPhone на экран «Домой» не берёт и рисует вместо иконки
+     снимок страницы. ?v= меняется вместе с картинкой: Safari помнит иконку по адресу -->
+<link rel="icon" type="image/png" sizes="192x192" href="./daima-192.png?v=2">
+<link rel="apple-touch-icon" href="./daima-180.png?v=2">
 <title>Даима · CRM</title>
 <style>
 /* ============ ШРИФТЫ ============ */
@@ -358,6 +360,7 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .rtile:not([disabled]):active,.rrow:not([disabled]):active{background:var(--raised)}
 .rcard{padding:12px 14px 4px}
 .rcard h3{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.rhint{margin:-4px 0 6px}
 .rcard h3 i{font-style:normal;text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim);white-space:nowrap}
 .rrow{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:6px 0;
   border-top:1px solid var(--line);text-align:left;font-size:15px}
@@ -373,6 +376,14 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .c-acc{color:var(--accent-fg)} .c-bad{color:var(--danger)} .c-warn{color:var(--warn)}
 .c-dim{color:var(--dim)} .c-mut{color:var(--muted)}
 @media (min-width:900px){ .rgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;align-items:start} }
+/* «Лиды»: поиск и кнопка фильтров в одну строку */
+.lfbar{display:flex;gap:8px;margin-bottom:12px}
+.lfbar input{flex:1;min-width:0}
+.lfbtn{flex:0 0 auto;min-height:var(--tap);padding:0 14px;border-radius:11px;border:1px solid var(--line);
+  background:var(--surface);font-weight:600;font-size:15px;display:flex;align-items:center;gap:7px}
+.lfbtn b{min-width:22px;height:22px;border-radius:11px;background:var(--accent);color:var(--accent-ink);
+  font-size:12.5px;display:grid;place-items:center;padding:0 6px}
+.lfbtn.on{border-color:var(--accent-fg)}
 /* Выборка из отчёта в «Лидах»: чип с подписью и крестиком */
 .chip.from{display:flex;align-items:center;gap:8px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .chip.from b{font-weight:400;opacity:.7}
@@ -1487,11 +1498,16 @@ function row(l){
    Значения — из настроек, только включённые. Этап и «Мои/Все/Ничьи» — чипами на экране. */
 const LF_TOUCH = { today:'Сегодня', week:'7 дней', month:'30 дней', old:'Больше 30 дней назад', never:'Ни разу' };
 const LF_LEVEL = { owner:'Собственник', manager:'Управляющий', admin:'Администратор', none:'Ни с кем' };
-const lfCount = () => Object.values(S.lf||{}).filter(Boolean).length;
-// Подпись включённого фильтра для чипа под кнопкой «Фильтры»
+const lfCount = () => lfChips().length;
+// Подпись включённого фильтра для чипа под кнопкой «Фильтры». «Все ответственные»
+// и «Все этапы» — не фильтр, чипа нет. «Мои» — по умолчанию, но чип виден:
+// без него не понять, почему в списке не все лиды.
+const OWN_TITLE = { mine:'Мои и ничьи', none:'Ничьи' };
 function lfChips(){
   const lf=S.lf||{}, out=[];
   if(lf.who) out.push(['who', 'Ответственный: '+((S.staff.find(u=>u.id===lf.who)?.name||'…').split(' ')[0])]);
+  else if(OWN_TITLE[S.own]) out.push(['own', OWN_TITLE[S.own]]);
+  if(S.filter!=='all') out.push(['stage', S.filter==='open' ? 'В работе' : 'Этап: '+(STATUS[S.filter]||S.filter)]);
   if(lf.touch) out.push(['touch', 'Касание: '+LF_TOUCH[lf.touch].toLowerCase()]);
   if(lf.level) out.push(['level', 'Говорили: '+LF_LEVEL[lf.level].toLowerCase()]);
   if(lf.lost) out.push(['lost', 'Отказ: '+(LOST[lf.lost]||lf.lost)]);
@@ -1509,6 +1525,7 @@ async function loadObjList(){
 async function leadFilterSheet(){
   try{ await loadObjList(); }catch(e){ return toast(e.message,true); }
   const lf={...(S.lf||{})};
+  let own=S.own, stage=S.filter;
   // Выбранное значение показываем, даже если его потом выключили в настройках
   const sec=(key,title,opts)=>{
     const list=opts.filter(([v,,on])=>on!==false || lf[key]===v);
@@ -1517,8 +1534,14 @@ async function leadFilterSheet(){
       `<button class="chip ${lf[key]===v?'on':''}" data-lf="${key}" data-v="${esc(v)}">${esc(t)}</button>`).join('')}</div>`;
   };
   const d=document.createElement('div'); d.className='sheet';
+  // Ответственный и этап выбираются всегда, снять нельзя: «Все» — тоже выбор
+  const one=(key,title,cur,opts)=>`<label>${title}</label><div class="chips" style="flex-wrap:wrap">${opts.map(([v,t])=>
+      `<button class="chip ${cur===v?'on':''}" data-one="${key}" data-v="${esc(v)}">${esc(t)}</button>`).join('')}</div>`;
   const body=()=>[
-    isAdmin() && S.staff.length>1 ? sec('who','Ответственный', S.staff.map(u=>[u.id,u.name,u.active])) : '',
+    one('own','Ответственный', lf.who||own, [['mine','Мои и ничьи'],['all','Все'],['none','Ничьи'],
+      ...(isAdmin() && S.staff.length>1 ? S.staff.filter(u=>u.active||u.id===lf.who).map(u=>[u.id,u.name]) : [])]),
+    one('stage','Этап', stage, [['all','Все'],['open','В работе'],
+      ...S.stages.filter(s=>s.active||s.code===stage).map(s=>[s.code,s.title])]),
     sec('touch','Последнее касание', Object.entries(LF_TOUCH)),
     sec('level','С кем говорили — самый высокий уровень', Object.entries(LF_LEVEL)),
     sec('lost','Причина отказа', S.lostReasons.map(r=>[r.code,r.title,r.active])),
@@ -1528,27 +1551,36 @@ async function leadFilterSheet(){
   ].join('');
   d.innerHTML=`<div class="inner"><div class="grab"></div>
     <h2 style="margin:0 0 6px;font-size:19px">Фильтры</h2>
-    <p class="note" style="margin:0">Работают вместе с этапом, «Мои» и поиском. Повторное нажатие снимает выбор.</p>
+    <p class="note" style="margin:0">Работают вместе и с поиском. В нижних блоках повторное нажатие снимает выбор.</p>
     <div id="lf_body">${body()}</div>
     <div class="sfoot"><button class="btn ghost" id="lf_clear">Сбросить</button><button class="btn" id="lf_go">Показать</button></div>
   </div>`;
   openSheet(d, {name:'leadfilter'});
-  const bindBody=()=>d.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{
-    const k=b.dataset.lf, v=b.dataset.v;
-    if(lf[k]===v) delete lf[k]; else lf[k]=v;
-    d.querySelector('#lf_body').innerHTML=body(); bindBody();
-  });
+  const redraw=()=>{ d.querySelector('#lf_body').innerHTML=body(); bindBody(); };
+  const bindBody=()=>{
+    d.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{
+      const k=b.dataset.lf, v=b.dataset.v;
+      if(lf[k]===v) delete lf[k]; else lf[k]=v;
+      redraw();
+    });
+    d.querySelectorAll('[data-one]').forEach(b=>b.onclick=()=>{
+      const v=b.dataset.v;
+      if(b.dataset.one==='stage') stage=v;
+      // Конкретный человек — это «Все» плюс его имя
+      else if(['mine','all','none'].includes(v)){ own=v; delete lf.who; }
+      else { own='all'; lf.who=v; }
+      redraw();
+    });
+  };
   bindBody();
-  const apply=v=>{ S.lf=v; closeSheet(d); go('list'); };
-  d.querySelector('#lf_go').onclick=()=>apply(lf);
-  d.querySelector('#lf_clear').onclick=()=>apply({});
+  const apply=(v,o,st)=>{ S.lf=v; S.own=o; S.filter=st; closeSheet(d); go('list'); };
+  d.querySelector('#lf_go').onclick=()=>apply(lf, own, stage);
+  // Сброс — к тому, с чего список открывается: мои и ничьи, все этапы
+  d.querySelector('#lf_clear').onclick=()=>apply({}, 'mine', 'all');
 }
 
 /* ── СПИСОК ── */
 function listScreen(){
-  const f=[['all','Все'],['open','В работе'],
-    ...S.stages.filter(s=>s.active||s.code===S.filter).map(s=>[s.code,s.title])];
-  const o=[['mine','Мои'],['all','Все ответственные'],['none','Ничьи']];
   // Пришли из отчёта — стрелка назад в отчёт и чип выборки. Крестик снимает выборку
   const back = S.back.length ? `<button class="back" data-back aria-label="Назад">‹</button>` : '';
   const from = S.sel ? `<div class="chips"><button class="chip on from" id="sel_off">Из отчёта: ${esc(S.sel.t)}
@@ -1556,14 +1588,12 @@ function listScreen(){
   const head=`<div class="topbar">${back}<h1>Лиды<span class="sub">${S.data.length} ${plural(S.data.length,'запись','записи','записей')}</span></h1></div>
   <div class="wrap" style="padding-bottom:0">
     ${from}
-    <input id="q" type="text" placeholder="Поиск: название, ЛПР, телефон" value="${esc(S.q)}" style="margin-bottom:12px">
-    <div class="chips">${o.map(([k,v])=>
-      `<button class="chip ${S.own===k?'on':''}" data-o="${k}">${v}</button>`).join('')}</div>
-    <div class="chips">${f.map(([k,v])=>
-      `<button class="chip ${S.filter===k?'on':''}" data-f="${k}">${v}</button>`).join('')}</div>
-    <div class="chips" style="flex-wrap:wrap">
-      <button class="chip ${lfCount()?'on':''}" id="lf_open">Фильтры${lfCount()?' · '+lfCount():''}</button>
-      ${lfChips().map(([k,t])=>`<button class="chip lfx" data-lf-off="${k}">${esc(t)} ✕</button>`).join('')}</div>
+    <div class="lfbar">
+      <input id="q" type="text" placeholder="Название, ЛПР, телефон" value="${esc(S.q)}">
+      <button class="lfbtn ${lfCount()?'on':''}" id="lf_open">Фильтры${lfCount()?`<b>${lfCount()}</b>`:''}</button>
+    </div>
+    ${lfCount()?`<div class="chips" style="flex-wrap:wrap">${lfChips().map(([k,t])=>
+      `<button class="chip lfx" data-lf-off="${k}">${esc(t)} ✕</button>`).join('')}</div>`:''}
   </div>`;
   // Новый поиск или фильтр: прежние строки остаются видны приглушёнными, пока идёт
   // ответ. Раньше экран на каждую паузу в наборе мигал крутилкой.
@@ -3271,7 +3301,7 @@ const LV_RANK = { admin:1, manager:2, owner:3 };
 // и возражения. Выключенное из отчёта пропадает, даже если по нему были записи.
 const REP_TILES = { touches:'Касаний', calls:'Звонков', rate:'Дозвон', talks:'Разговоров',
   dm:'Вышли на ЛПР', leads:'Лидов в работе', moved:'Сдвинули этап', won:'Новых клиентов', cash:'Поступило' };
-const REP_BLOCKS = { channels:'Каналы', funnel:'Движение по воронке', conv:'Докуда дошли лиды',
+const REP_BLOCKS = { channels:'Каналы', funnel:'Переходы на этап', conv:'Докуда дошли лиды',
   money:'Деньги', lost:'Почему отказали', objections:'Возражения' };
 const REPORT_DEF = { tiles:['touches','rate','dm'],
   blocks:Object.keys(REP_BLOCKS).map(id=>({id, on:true})), sync:true };
@@ -3514,10 +3544,12 @@ function reportCards(r){
       return { t:'КАНАЛЫ', right: r.showRate&&r.calls ? `дозвон ${r.reached} из ${r.calls}` : '',
         rows:r.channels.map(c=>({l:c.l, v:c.n, c:c.n?'txt':'dim', bar:c.n/max, sel:c.sel})) };
     },
-    funnel:()=>({ t:'ДВИЖЕНИЕ ПО ВОРОНКЕ', right: r.showLv ? 'соб · упр · адм · никто' : 'лидов', xw:'lv',
+    funnel:()=>({ t:'ПЕРЕХОДЫ НА ЭТАП', right: r.showLv ? 'соб · упр · адм · никто' : 'лидов', xw:'lv',
+      hint:'Сколько лидов за период перешли на этап. Лида, которого не двигали, здесь нет.',
       rows:r.funnel.map(f=>({l:f.l, lc:'mut', v:f.n, c:f.n?f.tone:'dim', big:true, sel:f.sel,
         x: r.showLv ? `${f.lv.owner} · ${f.lv.manager} · ${f.lv.admin} · ${f.lv.none}` : null, xc:f.n?'mut':'dim'})) }),
     conv:()=>({ t:'ДОКУДА ДОШЛИ ЛИДЫ', xw:'pct',
+      hint:'Все лиды, с кем работали за период, и самый дальний этап каждого. % — от строки выше.',
       right: r.showDemo ? `демо: общих ${r.demos.general} · индивид. ${r.demos.custom}` : '',
       rows:r.conv.map((c,i)=>{ const v=c.ids.length, prev=i?r.conv[i-1].ids.length:0;
         const pct = i && prev ? Math.round(v/prev*100) : null;
@@ -3552,6 +3584,7 @@ function reportHTML(r){
   const cards=reportCards(r).map(c=>{
     const max=c.rows.some(x=>x.bar!=null);
     return `<div class="card rcard"><h3><span>${esc(c.t)}</span>${c.right?`<i>${esc(c.right)}</i>`:''}</h3>${
+      c.hint?`<p class="note rhint">${esc(c.hint)}</p>`:''}${
       c.rows.map(x=>`<button class="rrow" ${go(x.sel)}>
         <span class="rl${tone(x.lc)}">${esc(x.l)}</span>
         ${max?`<span class="rb"><i style="width:${x.v?Math.max(4,Math.round((x.bar||0)*100)):0}%"></i></span>`:''}
@@ -3885,8 +3918,6 @@ function bind(){
     // Через history.back(), чтобы кнопка и жест вели себя одинаково
     if(S.back.length && history.state?.depth) history.back(); else popScreen();
   });
-  document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ S.filter=b.dataset.f; go('list'); });
-  document.querySelectorAll('[data-o]').forEach(b=>b.onclick=()=>{ S.own=b.dataset.o; go('list'); });
   document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{ S.period=b.dataset.p; go('report',false); });
   document.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{ S.repWho=b.dataset.w; go('report',false); });
   // Вкладка отчёта считается из уже загруженных данных: перезапрашивать нечего
@@ -3895,7 +3926,11 @@ function bind(){
   const lfo=document.getElementById('lf_open');
   if(lfo) lfo.onclick=()=>leadFilterSheet();
   document.querySelectorAll('[data-lf-off]').forEach(b=>b.onclick=()=>{
-    const lf={...S.lf}; delete lf[b.dataset.lfOff]; S.lf=lf; go('list'); });
+    const k=b.dataset.lfOff;
+    if(k==='own') S.own='all';
+    else if(k==='stage') S.filter='all';
+    else { const lf={...S.lf}; delete lf[k]; S.lf=lf; }
+    go('list'); });
   const selOff=document.getElementById('sel_off');
   if(selOff) selOff.onclick=()=>{ S.sel=null; go('list'); };
   const rcf=document.getElementById('rep_cfg');
