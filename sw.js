@@ -1,7 +1,8 @@
 // CRM Даима — кэш оболочки. Данные всегда берутся из сети.
-const V = 'daima-crm-v21';
-const SHELL = ['./', './index.html', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png',
-  './fonts/golos-text-cyrillic.woff2', './fonts/golos-text-latin.woff2', './fonts/unbounded-cyrillic.woff2'];
+const V = 'daima-crm-v23';
+// Иконки под новыми именами: под старым адресом телефон держал бы прежнюю картинку
+const SHELL = ['./', './index.html', './manifest.json', './daima.svg', './daima-180.png', './daima-192.png', './daima-512.png',
+  './fonts/ibm-plex-sans-cyrillic.woff2', './fonts/ibm-plex-sans-latin.woff2', './fonts/unbounded-cyrillic.woff2'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
