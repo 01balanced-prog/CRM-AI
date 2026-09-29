@@ -526,7 +526,7 @@ const S = { user:null, prof:null, view:'today', lead:null, tariffs:[], staff:[],
             scripts:[], lessons:[], progress:[], notes:[], lesson:null, callScript:null, segments:[],
             stages:STAGES_DEF, lostReasons:LOST_DEF, touchCfg:TOUCH_DEF, dictsLive:false,
             channels:CHANNELS_DEF, chanLive:false,
-            pick:null, qFocus:false, sel:null, repCfg:null };
+            pick:null, qFocus:false, sel:null, repCfg:null, lf:{}, objList:null };
 
 // Справочники из базы раскладываем по привычным объектам STATUS и LOST:
 // подписи в карточке, списке, отчёте и выгрузке меняются вместе с настройками.
@@ -916,11 +916,33 @@ async function fetchView(v){
     else if(S.own==='none') f += `&owner_id=is.null`;
     if(S.q) groups.push(searchGroup(S.q));
     if(groups.length) f += `&and=${encodeURIComponent('('+groups.join(',')+')')}`;
-    if(S.sel){
-      // Выборка из отчёта: лиды по списку, частями по 50 — длинный адрес может не пройти прокси.
+    // Фильтры из листа «Фильтры». То, что есть в v_leads, фильтрует база;
+    // канал и возражение живут в журнале — по ним сначала берём список лидов
+    const lf=S.lf||{}, enc=encodeURIComponent;
+    if(lf.who) f += `&owner_id=eq.${lf.who}`;
+    if(lf.lost) f += `&lost_reason=eq.${enc(lf.lost)}`;
+    if(lf.seg) f += `&segment=eq.${enc(lf.seg)}`;
+    if(lf.level) f += lf.level==='none' ? `&level=is.null` : `&level=eq.${lf.level}`;
+    if(lf.touch){
+      const d0=n=>{ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-n); return d.toISOString(); };
+      f += lf.touch==='never' ? `&last_touch_at=is.null`
+        : lf.touch==='old' ? `&last_touch_at=lt.${d0(30)}`
+        : `&last_touch_at=gte.${d0({today:0,week:6,month:29}[lf.touch])}`;
+    }
+    // Название возражения для чипа: после перезапуска справочника в памяти нет
+    if(lf.obj) await loadObjList();
+    let only = S.sel ? S.sel.ids : null;
+    for(const [col,val] of [['channel',lf.chan],['objection_id',lf.obj]]){
+      if(!val) continue;
+      const set=new Set((await dbAll(`activities?${col}=eq.${enc(val)}&select=lead_id&order=id`)).map(r=>r.lead_id));
+      only = only ? only.filter(id=>set.has(id)) : [...set];
+    }
+    if(only){
+      if(!only.length) return { data:[] };
+      // Лиды по списку, частями по 50 — длинный адрес может не пройти прокси.
       // Фильтры и поиск сверху сужают выборку, как и весь список.
       const parts=[];
-      for(let i=0;i<S.sel.ids.length;i+=50) parts.push(S.sel.ids.slice(i,i+50));
+      for(let i=0;i<only.length;i+=50) parts.push(only.slice(i,i+50));
       const got=(await Promise.all(parts.map(ids=>db(`v_leads?select=*${f}&id=in.(${ids.join(',')})`)))).flat();
       got.sort((a,b)=>(b.score||0)-(a.score||0) || String(a.company_name).localeCompare(String(b.company_name),'ru'));
       return { data:got };
@@ -940,7 +962,7 @@ let NAV = 0;                   // номер перехода: ответ ста
 const MAIN_TABS = ['today','list','more','team','learn'];
 
 function viewKey(v=S.view){
-  if(v==='list') return `list|${S.filter}|${S.own}|${S.q}${S.sel?'|sel:'+S.sel.k:''}`;
+  if(v==='list') return `list|${S.filter}|${S.own}|${S.q}${S.sel?'|sel:'+S.sel.k:''}${lfCount()?'|lf:'+JSON.stringify(S.lf):''}`;
   if(v==='report') return `report|${S.period}|${S.repWho}`;
   if(v==='person') return `person|${S.person?.id}`;
   if(v==='lead') return `lead|${S.lead?.id}`;
@@ -1000,7 +1022,7 @@ function findLeadRow(id){
 // Тот же стек обслуживает и системный жест «назад».
 function pushScreen(){
   S.back.push({view:S.view, leadId:S.lead?.id, personId:S.person?.id, lessonId:S.lesson?.id,
-               filter:S.filter, own:S.own, q:S.q, sel:S.sel});
+               filter:S.filter, own:S.own, q:S.q, sel:S.sel, lf:S.lf});
   try{ history.pushState({depth:S.back.length}, ''); }catch{}
 }
 
@@ -1011,7 +1033,7 @@ async function popScreen(){
   if(prev.view==='lead' && prev.leadId) return openLead(prev.leadId, false);
   if(prev.view==='person' && prev.personId) S.person = S.staff.find(u=>u.id===prev.personId) || S.person;
   if(prev.view==='lesson' && prev.lessonId) S.lesson = S.lessons.find(l=>l.id===prev.lessonId) || S.lesson;
-  S.filter=prev.filter; S.own=prev.own; S.q=prev.q; S.sel=prev.sel||null;
+  S.filter=prev.filter; S.own=prev.own; S.q=prev.q; S.sel=prev.sel||null; S.lf=prev.lf||{};
   return go(prev.view, false);
 }
 
@@ -1200,14 +1222,15 @@ function savePlace(){
   const top=SHEETS.at(-1);
   LS.set('place', { who:S.prof.id, at:Date.now(), view:S.view, leadId:S.lead?.id||null,
     personId:S.person?.id||null, lessonId:S.lesson?.id||null, editingId:S.editing?.id||null,
-    filter:S.filter, own:S.own, q:S.q, period:S.period, repTab:S.repTab, repWho:S.repWho, sel:S.sel,
+    filter:S.filter, own:S.own, q:S.q, period:S.period, repTab:S.repTab, repWho:S.repWho, sel:S.sel, lf:S.lf,
     back:S.back, sheet:top?.name||null, sheetArg:top?.arg||null, scroll:{...SCROLL, [S.curKey]:window.scrollY} });
 }
 async function restorePlace(){
   const p=LS.get('place');
   if(!p || p.who!==S.prof.id || Date.now()-p.at>12*3600e3) return go('today');
   Object.assign(S, { filter:p.filter||'all', own:p.own||'mine', q:p.q||'', period:p.period||'today',
-    repTab:p.repTab||'sum', repWho:p.repWho||'all', sel:p.sel?.ids ? p.sel : null });
+    repTab:p.repTab||'sum', repWho:p.repWho||'all', sel:p.sel?.ids ? p.sel : null,
+    lf:p.lf&&typeof p.lf==='object' ? p.lf : {} });
   Object.assign(SCROLL, p.scroll||{});
   S.back = Array.isArray(p.back) ? p.back : [];
   // Записи в истории браузера после перезапуска пропали — возвращаем, чтобы «назад» работал
@@ -1458,6 +1481,69 @@ function row(l){
   </div>`;
 }
 
+/* ── ФИЛЬТРЫ ЛИДОВ ──
+   Всё, по чему отчёт раскладывает лидов, фильтруется и прямо в «Лидах»: ответственный,
+   последнее касание, уровень контакта, причина отказа, возражение, канал, сегмент.
+   Значения — из настроек, только включённые. Этап и «Мои/Все/Ничьи» — чипами на экране. */
+const LF_TOUCH = { today:'Сегодня', week:'7 дней', month:'30 дней', old:'Больше 30 дней назад', never:'Ни разу' };
+const LF_LEVEL = { owner:'Собственник', manager:'Управляющий', admin:'Администратор', none:'Ни с кем' };
+const lfCount = () => Object.values(S.lf||{}).filter(Boolean).length;
+// Подпись включённого фильтра для чипа под кнопкой «Фильтры»
+function lfChips(){
+  const lf=S.lf||{}, out=[];
+  if(lf.who) out.push(['who', 'Ответственный: '+((S.staff.find(u=>u.id===lf.who)?.name||'…').split(' ')[0])]);
+  if(lf.touch) out.push(['touch', 'Касание: '+LF_TOUCH[lf.touch].toLowerCase()]);
+  if(lf.level) out.push(['level', 'Говорили: '+LF_LEVEL[lf.level].toLowerCase()]);
+  if(lf.lost) out.push(['lost', 'Отказ: '+(LOST[lf.lost]||lf.lost)]);
+  if(lf.obj) out.push(['obj', 'Возражение: '+(S.objList?.find(o=>o.id===lf.obj)?.title||'…')]);
+  if(lf.chan) out.push(['chan', 'Канал: '+(CHAN[lf.chan]||lf.chan)]);
+  if(lf.seg) out.push(['seg', 'Сегмент: '+lf.seg]);
+  return out;
+}
+async function loadObjList(){
+  if(S.objList) return S.objList;
+  try{ S.objList=await db('scripts?kind=eq.objection&select=id,title,active&order=sort_order,title'); }
+  catch(e){ if(isOffline(e)) throw e; S.objList=[]; }
+  return S.objList;
+}
+async function leadFilterSheet(){
+  try{ await loadObjList(); }catch(e){ return toast(e.message,true); }
+  const lf={...(S.lf||{})};
+  // Выбранное значение показываем, даже если его потом выключили в настройках
+  const sec=(key,title,opts)=>{
+    const list=opts.filter(([v,,on])=>on!==false || lf[key]===v);
+    if(!list.length) return '';
+    return `<label>${title}</label><div class="chips" style="flex-wrap:wrap">${list.map(([v,t])=>
+      `<button class="chip ${lf[key]===v?'on':''}" data-lf="${key}" data-v="${esc(v)}">${esc(t)}</button>`).join('')}</div>`;
+  };
+  const d=document.createElement('div'); d.className='sheet';
+  const body=()=>[
+    isAdmin() && S.staff.length>1 ? sec('who','Ответственный', S.staff.map(u=>[u.id,u.name,u.active])) : '',
+    sec('touch','Последнее касание', Object.entries(LF_TOUCH)),
+    sec('level','С кем говорили — самый высокий уровень', Object.entries(LF_LEVEL)),
+    sec('lost','Причина отказа', S.lostReasons.map(r=>[r.code,r.title,r.active])),
+    sec('obj','Возражение звучало', (S.objList||[]).map(o=>[o.id,o.title,o.active])),
+    sec('chan','Был канал', S.channels.filter(c=>c.kind!=='service').map(c=>[c.code,c.title,c.active])),
+    sec('seg','Сегмент', S.segments.map(g=>[g.name,g.name,g.active])),
+  ].join('');
+  d.innerHTML=`<div class="inner"><div class="grab"></div>
+    <h2 style="margin:0 0 6px;font-size:19px">Фильтры</h2>
+    <p class="note" style="margin:0">Работают вместе с этапом, «Мои» и поиском. Повторное нажатие снимает выбор.</p>
+    <div id="lf_body">${body()}</div>
+    <div class="sfoot"><button class="btn ghost" id="lf_clear">Сбросить</button><button class="btn" id="lf_go">Показать</button></div>
+  </div>`;
+  openSheet(d, {name:'leadfilter'});
+  const bindBody=()=>d.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.lf, v=b.dataset.v;
+    if(lf[k]===v) delete lf[k]; else lf[k]=v;
+    d.querySelector('#lf_body').innerHTML=body(); bindBody();
+  });
+  bindBody();
+  const apply=v=>{ S.lf=v; closeSheet(d); go('list'); };
+  d.querySelector('#lf_go').onclick=()=>apply(lf);
+  d.querySelector('#lf_clear').onclick=()=>apply({});
+}
+
 /* ── СПИСОК ── */
 function listScreen(){
   const f=[['all','Все'],['open','В работе'],
@@ -1475,6 +1561,9 @@ function listScreen(){
       `<button class="chip ${S.own===k?'on':''}" data-o="${k}">${v}</button>`).join('')}</div>
     <div class="chips">${f.map(([k,v])=>
       `<button class="chip ${S.filter===k?'on':''}" data-f="${k}">${v}</button>`).join('')}</div>
+    <div class="chips" style="flex-wrap:wrap">
+      <button class="chip ${lfCount()?'on':''}" id="lf_open">Фильтры${lfCount()?' · '+lfCount():''}</button>
+      ${lfChips().map(([k,t])=>`<button class="chip lfx" data-lf-off="${k}">${esc(t)} ✕</button>`).join('')}</div>
   </div>`;
   // Новый поиск или фильтр: прежние строки остаются видны приглушёнными, пока идёт
   // ответ. Раньше экран на каждую паузу в наборе мигал крутилкой.
@@ -3741,7 +3830,7 @@ function openSel(key){
   const x=S.report?.sel?.[key]; if(!x) return;
   pushScreen();
   S.sel={t:x.t, ids:x.ids, k:key+'|'+Date.now().toString(36)};
-  S.filter='all'; S.own='all'; S.q='';
+  S.filter='all'; S.own='all'; S.q=''; S.lf={};
   go('list', false, true);
 }
 
@@ -3803,6 +3892,10 @@ function bind(){
   // Вкладка отчёта считается из уже загруженных данных: перезапрашивать нечего
   document.querySelectorAll('[data-rt]').forEach(b=>b.onclick=()=>{ S.repTab=b.dataset.rt; render(); });
   document.querySelectorAll('[data-sel]').forEach(b=>b.onclick=()=>openSel(b.dataset.sel));
+  const lfo=document.getElementById('lf_open');
+  if(lfo) lfo.onclick=()=>leadFilterSheet();
+  document.querySelectorAll('[data-lf-off]').forEach(b=>b.onclick=()=>{
+    const lf={...S.lf}; delete lf[b.dataset.lfOff]; S.lf=lf; go('list'); });
   const selOff=document.getElementById('sel_off');
   if(selOff) selOff.onclick=()=>{ S.sel=null; go('list'); };
   const rcf=document.getElementById('rep_cfg');
