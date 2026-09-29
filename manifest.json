@@ -1,15 +1,16 @@
 {
-  "name": "Balance CRM",
-  "short_name": "Balance",
-  "description": "Продажи ИИ-агентов: лиды, звонки, воронка",
+  "name": "Даима · CRM",
+  "short_name": "Даима",
+  "description": "CRM отдела продаж Даима: лиды, звонки, воронка",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#080808",
-  "theme_color": "#080808",
+  "background_color": "#FAFAF8",
+  "theme_color": "#FAFAF8",
   "lang": "ru",
   "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "./icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
