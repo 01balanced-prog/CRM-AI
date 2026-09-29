@@ -1,6 +1,7 @@
-// Balance CRM — кэш оболочки. Данные всегда берутся из сети.
-const V = 'balance-crm-v20';
-const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
+// CRM Даима — кэш оболочки. Данные всегда берутся из сети.
+const V = 'daima-crm-v21';
+const SHELL = ['./', './index.html', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png',
+  './fonts/golos-text-cyrillic.woff2', './fonts/golos-text-latin.woff2', './fonts/unbounded-cyrillic.woff2'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

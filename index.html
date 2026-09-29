@@ -3,22 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
-<meta name="theme-color" content="#080808">
+<meta name="theme-color" content="#FAFAF8">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Balance">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Даима">
 <link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./icon-192.png">
-<title>Balance CRM</title>
+<title>Даима · CRM</title>
 <style>
+/* ============ ШРИФТЫ ============ */
+/* Фирменные шрифты Даима лежат рядом в fonts/ и кэшируются service worker'ом:
+   приложение открывается без сети и без внешних запросов. Лицензия OFL. */
+@font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
+  src:url(./fonts/golos-text-cyrillic.woff2) format("woff2");
+  unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:"Golos Text";font-style:normal;font-weight:400 900;font-display:swap;
+  src:url(./fonts/golos-text-latin.woff2) format("woff2");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+/* Unbounded — только написание имени «Даима», поэтому одна кириллица */
+@font-face{font-family:"Unbounded";font-style:normal;font-weight:400 900;font-display:swap;
+  src:url(./fonts/unbounded-cyrillic.woff2) format("woff2");
+  unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+
 /* ============ ТОКЕНЫ ============ */
+/* Цвета бренда Даима: светлый фон #FAFAF8, текст #14181A, подписи #6E7A74,
+   единственный акцент — мятный #18E08C. Мятный идёт в заливки (кнопка, чип,
+   полоска), а мелкий текст и значки на светлом фоне им не красятся: не читаются.
+   Для них --accent-fg, тот же мятный, затемнённый до читаемого. */
 :root{
-  --ink:#080808; --surface:#121212; --raised:#1A1A1A; --line:#242424;
-  --text:#F2F2F2; --muted:#8A8A8A; --dim:#5C5C5C;
-  --accent:#00E676; --accent-ink:#062B16; --danger:#FF5252; --warn:#FFB020;
+  --ink:#FAFAF8; --surface:#FFFFFF; --raised:#F1F2EF; --line:#E2E5E1;
+  --text:#14181A; --muted:#6E7A74; --dim:#7D8883;
+  --accent:#18E08C; --accent-ink:#14181A; --accent-fg:#0A8452;
+  --danger:#D93025; --warn:#A15C00;
   --r:14px; --tap:48px;
-  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --sans:"Golos Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --brand:"Unbounded","Golos Text",-apple-system,BlinkMacSystemFont,sans-serif;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
@@ -28,14 +50,14 @@ body{
 }
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;background:none}
-a{color:var(--accent);text-decoration:none}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a{color:var(--accent-fg);text-decoration:none}
+:focus-visible{outline:2px solid var(--accent-fg);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* ============ КАРКАС ============ */
 #app{min-height:100%;padding-bottom:calc(76px + env(safe-area-inset-bottom))}
 .topbar{
-  position:sticky;top:0;z-index:20;background:rgba(8,8,8,.92);
+  position:sticky;top:0;z-index:20;background:rgba(250,250,248,.92);
   backdrop-filter:blur(12px);border-bottom:1px solid var(--line);
   padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
   display:flex;align-items:center;gap:12px;min-height:56px;
@@ -49,14 +71,14 @@ a{color:var(--accent);text-decoration:none}
 /* ============ НИЗ ============ */
 .nav{
   position:fixed;left:0;right:0;bottom:0;z-index:30;display:grid;
-  grid-template-columns:repeat(5,1fr);background:rgba(8,8,8,.94);
+  grid-template-columns:repeat(5,1fr);background:rgba(250,250,248,.94);
   backdrop-filter:blur(12px);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom);
 }
 .nav button{padding:9px 0 10px;display:flex;flex-direction:column;align-items:center;
   gap:3px;color:var(--dim);font-size:10.5px;letter-spacing:0}
 .nav button .ic{font-size:20px;line-height:1}
-.nav button.on{color:var(--accent)}
+.nav button.on{color:var(--accent-fg)}
 .nav .badge{position:absolute;transform:translate(14px,-6px);background:var(--danger);
   color:#fff;font-size:10px;font-weight:700;min-width:17px;height:17px;border-radius:9px;
   display:grid;place-items:center;padding:0 4px;font-family:var(--mono)}
@@ -68,7 +90,7 @@ a{color:var(--accent);text-decoration:none}
   letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .stat span{font-size:12px;color:var(--muted)}
 .stat.hot b{color:var(--danger)}
-.stat.go b{color:var(--accent)}
+.stat.go b{color:var(--accent-fg)}
 
 /* ============ СТРОКА ЛИДА — сигнатурный элемент ============ */
 .row{
@@ -79,8 +101,8 @@ a{color:var(--accent);text-decoration:none}
 .rail{width:4px;flex:0 0 4px;background:var(--dim)}
 .rail.due{background:var(--accent)}
 .rail.late{background:var(--danger)}
-.rail.won{background:#3A7BD5}
-.rail.lost{background:#2A2A2A}
+.rail.won{background:var(--text)}
+.rail.lost{background:var(--line)}
 .row .body{flex:1;min-width:0;padding:12px 8px 12px 13px;text-align:left}
 .row .nm{font-weight:600;font-size:16px;letter-spacing:-.01em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -89,18 +111,18 @@ a{color:var(--accent);text-decoration:none}
 .row .meta .late{color:var(--danger);font-weight:600}
 /* Сдвиг этапа в отчёте «с кем работали» — своей строкой: в общей он не помещается
    и обрезается многоточием, а это главное, что случилось с лидом за день */
-.row .move{font-size:12.5px;color:var(--accent);margin-top:3px;
+.row .move{font-size:12.5px;color:var(--accent-fg);margin-top:3px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .call{
   flex:0 0 62px;display:grid;place-items:center;border-left:1px solid var(--line);
-  background:var(--raised);color:var(--accent);
+  background:var(--raised);color:var(--accent-fg);
 }
-.row .call:active{background:#202020}
+.row .call:active{background:var(--line)}
 .sc{font-family:var(--mono);font-size:11px;color:var(--dim);
   border:1px solid var(--line);border-radius:5px;padding:0 4px;margin-left:6px;
   font-variant-numeric:tabular-nums;white-space:nowrap}
 .sc.who{font-family:var(--sans);color:var(--muted)}
-.sc.none{font-family:var(--sans);color:var(--warn);border-color:rgba(255,176,32,.35)}
+.sc.none{font-family:var(--sans);color:var(--warn);border-color:rgba(161,92,0,.35)}
 
 /* ============ ЧИПЫ ============ */
 .chips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 12px;
@@ -116,10 +138,10 @@ a{color:var(--accent);text-decoration:none}
 #app.docked{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
 .dock{position:fixed;left:0;right:0;bottom:calc(58px + env(safe-area-inset-bottom));z-index:25;
   display:grid;grid-template-columns:56px 1fr;gap:8px;padding:10px 16px;
-  background:linear-gradient(180deg,rgba(8,8,8,0),rgba(8,8,8,.96) 30%)}
+  background:linear-gradient(180deg,rgba(250,250,248,0),rgba(250,250,248,.96) 30%)}
 .dock .btn{margin:0;height:52px}
 .dock .dcall{height:52px;border-radius:12px;background:var(--raised);border:1px solid var(--line);
-  display:grid;place-items:center;color:var(--accent)}
+  display:grid;place-items:center;color:var(--accent-fg)}
 .dock .dcall[disabled]{opacity:.32}
 .dock .dscript{height:52px;border-radius:12px;background:var(--raised);border:1px solid var(--line);
   padding:0 14px;font-weight:600;font-size:15px;color:var(--text);white-space:nowrap}
@@ -130,7 +152,7 @@ a{color:var(--accent);text-decoration:none}
 .txt ul{margin:0 0 12px;padding-left:20px}
 .txt li{margin:3px 0}
 .txt b{color:var(--text)}
-.txt .var{color:var(--accent)}
+.txt .var{color:var(--accent-fg)}
 .obj{border-top:1px solid var(--line);padding:10px 0}
 .obj button{width:100%;text-align:left;font-size:15px;font-weight:600;padding:4px 0;display:flex;justify-content:space-between}
 .obj button:after{content:"▾";color:var(--dim)}
@@ -140,11 +162,11 @@ a{color:var(--accent);text-decoration:none}
 .q{border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin:12px 0;background:var(--surface)}
 .q .qt{font-weight:600;margin-bottom:6px}
 .q .opt{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:15px}
-.q .opt input{width:20px;height:20px;accent-color:var(--accent);flex:0 0 20px}
-.q.ok{border-color:rgba(0,230,118,.5)}
-.q.bad{border-color:rgba(255,82,82,.5)}
+.q .opt input{width:20px;height:20px;accent-color:var(--accent-fg);flex:0 0 20px}
+.q.ok{border-color:var(--accent)}
+.q.bad{border-color:rgba(217,48,37,.5)}
 .q .hint{margin-top:8px;font-size:14px;color:var(--warn)}
-.q.ok .hint{color:var(--accent)}
+.q.ok .hint{color:var(--accent-fg)}
 .toast .tb{display:block;margin-top:8px;padding:9px 0;text-align:center;border-radius:9px;
   background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:15px;width:100%}
 .more{width:100%;text-align:left;padding:12px 0;margin-top:6px;color:var(--muted);font-size:14.5px;
@@ -173,13 +195,13 @@ a{color:var(--accent);text-decoration:none}
 
 .badge2{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;
   font-weight:600;background:var(--raised);border:1px solid var(--line)}
-.badge2.go{background:rgba(0,230,118,.13);border-color:rgba(0,230,118,.3);color:var(--accent)}
-.badge2.no{background:rgba(255,82,82,.12);border-color:rgba(255,82,82,.3);color:var(--danger)}
+.badge2.go{background:rgba(24,224,140,.14);border-color:rgba(24,224,140,.5);color:var(--accent-fg)}
+.badge2.no{background:rgba(217,48,37,.08);border-color:rgba(217,48,37,.3);color:var(--danger)}
 
 /* ============ ЛПР ============ */
 .dmblock{border:1px solid var(--line);border-radius:var(--r);padding:2px 13px 14px;
   margin:18px 0 4px;background:var(--surface)}
-.dmhead{font-size:12px;font-weight:650;color:var(--accent);text-transform:uppercase;
+.dmhead{font-size:12px;font-weight:650;color:var(--accent-fg);text-transform:uppercase;
   letter-spacing:.08em;margin:14px 0 0}
 
 /* ============ КОНТАКТЫ ============ */
@@ -189,14 +211,14 @@ a{color:var(--accent);text-decoration:none}
 .ct-main b{display:block;font-size:15.5px;font-weight:650;letter-spacing:-.01em}
 .ct-main span{display:block;font-size:12px;color:var(--muted);margin-top:1px}
 .ct-main i{display:block;font-style:normal;font-family:var(--mono);font-size:14px;
-  color:var(--accent);margin-top:3px}
+  color:var(--accent-fg);margin-top:3px}
 .ct-main i.no{color:var(--dim)}
 .ct.dm .ct-main b:after{content:"ЛПР";margin-left:7px;font-size:10px;font-weight:700;
   color:var(--accent-ink);background:var(--accent);border-radius:4px;padding:1px 5px;
   vertical-align:middle;letter-spacing:.03em}
 .ct-btn{flex:0 0 42px;height:42px;border-radius:11px;background:var(--raised);
-  border:1px solid var(--line);display:grid;place-items:center;color:var(--accent)}
-.ct-btn:active{background:#202020}
+  border:1px solid var(--line);display:grid;place-items:center;color:var(--accent-fg)}
+.ct-btn:active{background:var(--line)}
 
 /* ============ ЭТАПЫ ОПЛАТЫ ============ */
 .pbar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;margin:0 0 12px}
@@ -210,7 +232,7 @@ a{color:var(--accent);text-decoration:none}
 .stage .who{flex:1;min-width:0}
 .stage .who b{display:block;font-size:14.5px;font-weight:600}
 .stage .who span{display:block;font-size:12px;color:var(--dim);margin-top:1px}
-.stage.done .who span{color:var(--accent)}
+.stage.done .who span{color:var(--accent-fg)}
 .stage .amt{font-family:var(--mono);font-size:14.5px;color:var(--muted);white-space:nowrap}
 .stage.done .amt{color:var(--text)}
 
@@ -240,16 +262,16 @@ input[type=number],input[type=date],select,textarea{
   padding:12px 13px;font-size:16px;min-height:var(--tap);appearance:none;
 }
 textarea{min-height:88px;resize:vertical;line-height:1.45}
-select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' stroke='%238A8A8A' stroke-width='1.6' fill='none'/></svg>");
+select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' stroke='%236E7A74' stroke-width='1.6' fill='none'/></svg>");
   background-repeat:no-repeat;background-position:right 14px center;padding-right:38px}
 .check{display:flex;align-items:center;gap:11px;padding:11px 0;font-size:15px;color:var(--text)}
-.check input{width:22px;height:22px;min-height:0;accent-color:var(--accent);flex:0 0 22px}
+.check input{width:22px;height:22px;min-height:0;accent-color:var(--accent-fg);flex:0 0 22px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
 .btn{width:100%;height:52px;border-radius:12px;background:var(--accent);color:var(--accent-ink);
   font-weight:700;font-size:16px;margin-top:18px;letter-spacing:-.01em}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text);font-weight:600}
-.btn.warn{background:transparent;border:1px solid rgba(255,82,82,.4);color:var(--danger)}
+.btn.warn{background:transparent;border:1px solid rgba(217,48,37,.4);color:var(--danger)}
 .btn:disabled{opacity:.45}
 
 /* ============ СЛУЖЕБНОЕ ============ */
@@ -258,13 +280,13 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .empty p{margin:0 0 4px;font-size:15px}
 .empty .hint{font-size:13.5px;color:var(--dim)}
 .toast{position:fixed;left:16px;right:16px;bottom:calc(88px + env(safe-area-inset-bottom));
-  background:var(--raised);border:1px solid var(--line);border-radius:12px;padding:13px 15px;
-  font-size:14.5px;z-index:60;box-shadow:0 10px 30px rgba(0,0,0,.6)}
-.toast.err{border-color:rgba(255,82,82,.45);color:#FFC9C9}
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 15px;
+  font-size:14.5px;z-index:60;box-shadow:0 10px 30px rgba(20,24,26,.14)}
+.toast.err{border-color:rgba(217,48,37,.45);color:var(--danger)}
 .spin{width:22px;height:22px;border:2px solid var(--line);border-top-color:var(--accent);
   border-radius:50%;animation:sp .7s linear infinite;margin:44px auto}
 @keyframes sp{to{transform:rotate(360deg)}}
-.sheet{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.6);display:flex;align-items:flex-end}
+.sheet{position:fixed;inset:0;z-index:50;background:rgba(20,24,26,.4);display:flex;align-items:flex-end}
 .sheet .inner{width:100%;max-height:88vh;overflow:auto;background:var(--surface);
   border-radius:20px 20px 0 0;border-top:1px solid var(--line);
   padding:18px 16px calc(22px + env(safe-area-inset-bottom))}
@@ -289,14 +311,14 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .pb .tick{position:absolute;top:0;width:2px;height:100%;background:var(--text);opacity:.55}
 .pm.done .pb i{background:var(--accent)}
 .pm .pv{font-family:var(--mono);font-size:14px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.pm.done .pv{color:var(--accent)}
+.pm.done .pv{color:var(--accent-fg)}
 .pline{margin:8px 0 0;font-size:13px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums}
 .pline b{color:var(--text);font-weight:600}
 /* ============ КОМАНДА ============ */
 .person{width:100%;display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);text-align:left}
 .person:last-child{border-bottom:0}
 .person .av{flex:0 0 40px;height:40px;border-radius:50%;background:var(--raised);border:1px solid var(--line);
-  display:grid;place-items:center;font-weight:700;color:var(--accent)}
+  display:grid;place-items:center;font-weight:700;color:var(--accent-fg)}
 .person.off .av{color:var(--dim)}
 .person .who{flex:1;min-width:0}
 .person .who b{display:block;font-size:15.5px;font-weight:650}
@@ -313,7 +335,7 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .link:last-child{border-bottom:0}
 .link:after{content:"›";color:var(--dim);font-size:20px}
 .link .cnt{font-family:var(--mono);color:var(--dim);font-size:13px;margin-right:8px}
-.notice{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.3);border-radius:var(--r);
+.notice{background:rgba(161,92,0,.06);border:1px solid rgba(161,92,0,.28);border-radius:var(--r);
   padding:12px 14px;margin-bottom:12px;font-size:14px;display:flex;gap:10px;align-items:center}
 .notice b{color:var(--warn)}
 .notice .go{margin-left:auto;color:var(--warn);font-weight:700;white-space:nowrap}
@@ -336,7 +358,7 @@ select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.o
 .obtn[disabled]{opacity:.25}
 /* Сортировка перетаскиванием */
 .drag{flex:0 0 40px;height:48px;display:grid;place-items:center;color:var(--dim);font-size:22px;touch-action:none;cursor:grab;user-select:none}
-.drow.dragging{position:relative;z-index:5;background:var(--raised);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.6)}
+.drow.dragging{position:relative;z-index:5;background:var(--raised);border-radius:10px;box-shadow:0 8px 24px rgba(20,24,26,.14)}
 .dcol{flex:1;min-width:0;padding:6px 0}
 .dti{min-height:40px!important;padding:7px 10px!important;font-size:15px!important;font-weight:600;background:transparent!important;border-color:transparent!important}
 .dti:focus{background:var(--raised)!important;border-color:var(--line)!important}
@@ -357,18 +379,22 @@ body.sheeted .toast{bottom:auto!important;top:calc(12px + env(safe-area-inset-to
 .ptr{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top));z-index:40;width:36px;height:36px;margin-left:-18px;
   border-radius:50%;background:var(--raised);border:1px solid var(--line);display:grid;place-items:center;
   color:var(--muted);font-size:18px;opacity:0;transform:translateY(-50px);pointer-events:none}
-.ptr.go{color:var(--accent)}
+.ptr.go{color:var(--accent-fg)}
 .ptr.run{opacity:1;transform:translateY(40px)}
 .ptr.run i{animation:sp .7s linear infinite}
 /* Режим выбора в списке */
-.row.picked{border-color:var(--accent)}
+.row.picked{border-color:var(--accent-fg)}
 .tickbox{flex:0 0 62px;display:grid;place-items:center;border-left:1px solid var(--line);
-  background:var(--raised);color:var(--accent);font-weight:700;font-size:20px}
+  background:var(--raised);color:var(--accent-fg);font-weight:700;font-size:20px}
 
 /* ============ ВХОД ============ */
 .login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px}
-.logo{font-size:30px;font-weight:750;letter-spacing:-.035em;margin-bottom:4px}
-.logo i{color:var(--accent);font-style:normal}
+.logo{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.logo svg{flex:0 0 48px;width:48px;height:48px;border-radius:50%}
+/* Написание-знак: Unbounded, «и» мятная и чуть жирнее — так в бренд-своде */
+.logo b{display:block;font-family:var(--brand);font-size:30px;font-weight:600;letter-spacing:-.01em;line-height:1}
+.logo b i{color:var(--accent);font-style:normal;font-weight:800}
+.logo span{display:block;font-size:13px;color:var(--muted);margin-top:7px}
 .login .tag{color:var(--muted);font-size:14px;margin-bottom:32px}
 </style>
 </head>
@@ -390,6 +416,19 @@ const API = SUPABASE_URL.trim().replace(/\/+$/,'').replace(/\/(rest|auth)\/v1$/,
 
 // Коды статусов в базе старые, подписи под новую воронку: контакт → демо → цена.
 // Брифа и индивидуального КП нет: цена одна для всех, ценность показывает демо.
+// Знак Даима: жирная восьмёрка на мятном круге. Нарисован фигурой, а не символом «∞»
+// из шрифта: так он везде одинаковый. Пропорции из бренд-свода: ширина 0,44 диаметра,
+// в 2,12 раза шире своей высоты, линия 0,244 высоты, центр смещён на −0,19 и −0,07
+// диаметра от центра круга. Координаты в круге диаметром 100. Те же файлы иконок.
+const MARK_PATH = 'M50.5 43L50.4 44.3L50.1 45.5L49.7 46.6L49.1 47.7L48.5 48.6L47.7 49.4L46.8 50L45.9 50.4L44.9 50.7L43.9 50.8L42.9 50.8L41.8 50.7L40.8 50.4L39.9 50L38.9 49.5L37.9 49L37 48.4L36.1 47.7L35.2 47L34.4 46.2L33.5 45.5L32.7 44.6L31.8 43.8L31 43L30.2 42.2L29.3 41.4L28.5 40.5L27.6 39.8L26.8 39L25.9 38.3L25 37.6L24.1 37L23.1 36.5L22.1 36L21.2 35.6L20.2 35.3L19.1 35.2L18.1 35.2L17.1 35.3L16.1 35.6L15.2 36L14.3 36.6L13.5 37.4L12.8 38.3L12.3 39.4L11.9 40.5L11.6 41.7L11.5 43L11.6 44.3L11.9 45.5L12.3 46.6L12.8 47.7L13.5 48.6L14.3 49.4L15.2 50L16.1 50.4L17.1 50.7L18.1 50.8L19.1 50.8L20.2 50.7L21.2 50.4L22.1 50L23.1 49.5L24.1 49L25 48.4L25.9 47.7L26.8 47L27.6 46.2L28.5 45.5L29.3 44.6L30.2 43.8L31 43L31.8 42.2L32.7 41.4L33.5 40.5L34.4 39.8L35.2 39L36.1 38.3L37 37.6L37.9 37L38.9 36.5L39.9 36L40.8 35.6L41.8 35.3L42.9 35.2L43.9 35.2L44.9 35.3L45.9 35.6L46.8 36L47.7 36.6L48.5 37.4L49.1 38.3L49.7 39.4L50.1 40.5L50.4 41.7Z';
+const MARK_W = 5.06;
+const markSVG = (ink='#14181A', mint='#18E08C') =>
+  `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="50" fill="${mint}"/>`+
+  `<path d="${MARK_PATH}" fill="none" stroke="${ink}" stroke-width="${MARK_W}" stroke-linejoin="round"/></svg>`;
+// Имя не появляется без строки описания — правило бренда
+const LOGO = () => `<div class="logo">${markSVG()}<div><b>Да<i>и</i>ма</b>
+  <span>ИИ-агенты для кафе и доставки</span></div></div>`;
+
 const STATUS = {
   new:'Новый', no_answer:'Не дозвонился', contacted:'Контакт установлен',
   brief_done:'Демо получил', proposal_sent:'Цена названа',
@@ -1169,19 +1208,19 @@ function render(){
 }
 
 function setupScreen(){
-  return `<div class="login"><div class="logo">balance<i>.</i></div>
+  return `<div class="login">${LOGO()}
   <p class="tag">Файл ещё не настроен</p>
   <div class="card"><p style="margin:0;font-size:14.5px;line-height:1.6">
   Открой <b>index.html</b> и замени два значения в самом верху блока
   <span style="font-family:var(--mono)">&lt;script&gt;</span>:<br><br>
-  <span style="font-family:var(--mono);color:var(--accent)">SUPABASE_URL</span> — из Settings → Data API<br>
-  <span style="font-family:var(--mono);color:var(--accent)">SUPABASE_KEY</span> — из Settings → API Keys, ключ на <span style="font-family:var(--mono)">sb_publishable_</span>
+  <span style="font-family:var(--mono);color:var(--accent-fg)">SUPABASE_URL</span> — из Settings → Data API<br>
+  <span style="font-family:var(--mono);color:var(--accent-fg)">SUPABASE_KEY</span> — из Settings → API Keys, ключ на <span style="font-family:var(--mono)">sb_publishable_</span>
   </p></div></div>`;
 }
 
 function loginScreen(){
   return `<div class="login">
-    <div class="logo">balance<i>.</i></div>
+    ${LOGO()}
     <p class="tag">Вход для сотрудников</p>
     <label for="em">Почта</label>
     <input id="em" type="email" inputmode="email" autocomplete="username" autocapitalize="off">
@@ -1251,7 +1290,7 @@ function authErr(e){
 }
 
 function noAccessScreen(){
-  return `<div class="login"><div class="logo">balance<i>.</i></div>
+  return `<div class="login">${LOGO()}
   <p class="tag">Доступ не выдан</p>
   <div class="card"><p style="margin:0;font-size:14.5px;line-height:1.6">
   Учётная запись есть, но она не привязана к сотруднику. Попроси администратора
@@ -1263,7 +1302,7 @@ function bindNoAccess(){
 }
 // Первый запуск без связи: кэша профиля ещё нет, показать нечего. Сессию не трогаем.
 function offlineScreen(){
-  return `<div class="login"><div class="logo">balance<i>.</i></div>
+  return `<div class="login">${LOGO()}
   <p class="tag">Нет связи</p>
   <div class="card"><p style="margin:0;font-size:14.5px;line-height:1.6">
   Не удалось загрузить данные. Проверь интернет и попробуй ещё раз.
@@ -1507,6 +1546,8 @@ function leadScreen(){
         esc(u.name)}${u.role==='admin'?' (админ)':''}</option>`).join('')}
     </select>
     <button class="btn ghost" id="own_save" style="margin-top:10px">Переназначить</button>
+    <p class="note" style="margin:8px 0 0">Потом ответственным станет тот, кто запишет касание следующим.
+      Клиента касание не переназначает.</p>
   </div>` : '';
   const btns=`${takeBtn}
     <button class="btn ghost" data-note-lead>${draftGet('note:'+l.id)?'Дописать заметку':'Заметка или отложить'}</button>
@@ -1700,7 +1741,9 @@ function touchSheet(){
     const btn=$('save'); btn.disabled=true; btn.textContent='Сохраняю…';
     const status=stVal;
     const patch={ status, tariff:$('tf').value||null };
-    // Ничейный лид при касании становится твоим — это делает база в log_touch
+    // Касание закрепляет лид за тем, кто его записал, даже чужой: это делает база
+    // (db/22_owner_last_touch.sql). Клиент остаётся за прежним ответственным,
+    // если этим касанием он клиентом не стал.
     if(status==='lost'){
       patch.lost_reason=$('lr').value;
       if(!patch.lost_reason){ toast('Выбери причину отказа',true); btn.disabled=false; btn.textContent='Сохранить'; return; }
@@ -1736,7 +1779,9 @@ function touchSheet(){
         script_id:S.callScript?.script_id||null, objection_id:S.callScript?.objection_id||null,
         demo: gv('demo')||null });
       dr.clear(); closeSheet(d); S.callScript=null; LS.del('reach');
-      patchLeadEverywhere(l.id, {status:r?.status||status, next_action_at:patch.next_action_at, next_action:patch.next_action});
+      const mine = !(l.status==='won' && status==='won')
+        ? {owner_id:S.prof.id, owner_name:S.prof.name, is_mine:true} : {};
+      patchLeadEverywhere(l.id, {status:r?.status||status, next_action_at:patch.next_action_at, next_action:patch.next_action, ...mine});
       await openLead(l.id, false);
       if(r?.auto_closed) toast('Записано. Пять недозвонов подряд — лид закрыт',
         false, {label:'Следующий →', fn:nextLead});
@@ -2126,8 +2171,8 @@ function lessonOfDay(){
   const week=S.plan?.week;
   const late = l.due_week && week && week>l.due_week;
   return `<button class="notice" data-lesson="${l.id}" style="${late?'':'border-color:var(--line);background:var(--surface)'}">
-    <span><b style="${late?'':'color:var(--accent)'}">Урок дня</b> ${esc(l.title)}${l.due_week?`<i style="display:block;font-style:normal;font-size:12px;color:var(--dim)">${late?'просрочен: ':'пройти '}до ${l.due_week}-й недели</i>`:''}</span>
-    <span class="go" style="${late?'':'color:var(--accent)'}">Открыть</span></button>`;
+    <span><b style="${late?'':'color:var(--accent-fg)'}">Урок дня</b> ${esc(l.title)}${l.due_week?`<i style="display:block;font-style:normal;font-size:12px;color:var(--dim)">${late?'просрочен: ':'пройти '}до ${l.due_week}-й недели</i>`:''}</span>
+    <span class="go" style="${late?'':'color:var(--accent-fg)'}">Открыть</span></button>`;
 }
 
 function learnScreen(){
@@ -2793,7 +2838,7 @@ function moreScreen(){
     ${isAdmin()?`<button class="btn ghost" id="exp">Выгрузить всё в Excel</button>`:''}
     <button class="btn ghost" id="reload">Обновить данные</button>
     <button class="btn warn" id="out">Выйти</button>
-    <p class="note">Balance CRM · данные хранятся в Supabase, доступ по ролям.
+    <p class="note">CRM компании Даима · данные хранятся в Supabase, доступ по ролям.
     Журнал касаний неизменяем.</p>
     <p class="note" id="ver"></p>
   </div>`;
@@ -2804,7 +2849,7 @@ async function showVersion(){
   const el=document.getElementById('ver'); if(!el) return;
   try{
     const t=await (await fetch('./sw.js',{cache:'no-store'})).text();
-    const m=t.match(/balance-crm-v(\d+)/);
+    const m=t.match(/daima-crm-v(\d+)/);
     if(m) el.textContent=`Версия ${m[1]}`;
   }catch{}
 }
@@ -2859,12 +2904,12 @@ async function exportAll(){
       cts.map(c=>[c.companies?.name||'', c.name, c.position, c.phone_e164||c.phone_raw,
         c.is_decision_maker, c.is_primary]));
     const day=iso(new Date());
-    const files=[[`balance-leads-${day}.csv`,f1],[`balance-journal-${day}.csv`,f2],[`balance-contacts-${day}.csv`,f3]]
+    const files=[[`daima-leads-${day}.csv`,f1],[`daima-journal-${day}.csv`,f2],[`daima-contacts-${day}.csv`,f3]]
       .map(([n,t])=>new File([t], n, {type:'text/csv'}));
     // На телефоне отдаём через «Поделиться»: скрытая ссылка в приложении
     // с домашнего экрана может ничего не скачать. На компьютере обычное скачивание.
     if(navigator.canShare?.({files})){
-      await navigator.share({files, title:'Выгрузка Balance CRM'});
+      await navigator.share({files, title:'Выгрузка CRM · Даима'});
     }else{
       for(const f of files){
         const a=document.createElement('a');
@@ -3060,6 +3105,8 @@ function periodRange(kind){
   const start=new Date(now.getFullYear(), now.getMonth(), now.getDate());
   if(kind==='week') start.setDate(start.getDate()-6);
   if(kind==='month') start.setDate(start.getDate()-29);
+  // Всё время: с начала базы. Граница нужна только для сравнения дат оплаты
+  if(kind==='all') start.setTime(0);
   const end=new Date(now.getFullYear(), now.getMonth(), now.getDate()+1);
   return {from:start.toISOString(), to:end.toISOString(), start, kind};
 }
@@ -3078,14 +3125,18 @@ const LV_RANK = { admin:1, manager:2, owner:3 };
 
 async function loadReport(){
   const {from,to,kind}=periodRange(S.period);
+  // Страницами (dbAll): за всё время, да и за месяц командой, журнал больше
+  // 1000 строк, и Supabase молча отдал бы только первую тысячу.
+  // Порядок с id — чтобы страницы не перекрывались на одинаковом времени.
+  const span = kind==='all' ? '' : `created_at=gte.${from}&created_at=lt.${to}&`;
   const [acts, leads, team, lvRows] = await Promise.all([
-    db(`activities?created_at=gte.${from}&created_at=lt.${to}&select=*&order=created_at`),
-    db('v_leads?select=*'),
+    dbAll(`activities?${span}select=*&order=created_at,id`),
+    dbAll('v_leads?select=*&order=id'),
     isAdmin() ? db('v_team_today?select=*') : db('v_plan_today?select=*'),
     // Все разговоры с уровнем до конца периода: уровень лида на момент перехода
     // по этапу, а не сегодняшний. Иначе «Демо получил» у администратора
     // записывался собственнику, если до собственника дошли неделей позже.
-    db(`activities?spoke_with=not.is.null&created_at=lt.${to}&select=lead_id,spoke_with,created_at`)
+    dbAll(`activities?spoke_with=not.is.null&created_at=lt.${to}&select=id,lead_id,spoke_with,created_at&order=created_at,id`)
   ]);
   // Строка плана только для «сегодня»: план задаётся на день
   let planLine=null;
@@ -3278,12 +3329,14 @@ function reportSVGWide(r){ return reportDraw(r, true); }
 // Широкий экран: те же блоки парами в два столбца, отчёт помещается в один экран.
 function reportDraw(r, wide){
   const W=760, P=32, G=12;
-  const T={ink:'#080808',card:'#141414',line:'#262626',txt:'#F2F2F2',mut:'#8A8A8A',
-           dim:'#5C5C5C',acc:'#00E676',warn:'#FFB020',bad:'#FF5252'};
+  // Те же цвета, что в :root. Мятный acc — заливки; цифры и подписи «мятным» пишутся
+  // затемнённым acct, иначе на светлом фоне их не прочитать
+  const T={ink:'#FAFAF8',card:'#FFFFFF',line:'#E2E5E1',txt:'#14181A',mut:'#6E7A74',
+           dim:'#7D8883',acc:'#18E08C',acct:'#0A8452',warn:'#A15C00',bad:'#D93025'};
   const F='-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif';
   const M='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
   const e=t=>String(t??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const per={today:'за сегодня',week:'за 7 дней',month:'за 30 дней'}[r.kind];
+  const per=PERIOD_NAME[r.kind];
   const dt=new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
   // Размеры двух раскладок
   const Z = wide
@@ -3294,7 +3347,7 @@ function reportDraw(r, wide){
 
   const p=[];
   const box=(x,yy,w,h)=>p.push(`<rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="${Z.rad}" fill="${T.card}" stroke="${T.line}"/>`);
-  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c||T.txt}" font-family="${o.m?M:F}" font-size="${o.s||Z.fs}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
+  const tx=(x,yy,t,o={})=>p.push(`<text x="${x}" y="${yy}" fill="${o.c===T.acc?T.acct:(o.c||T.txt)}" font-family="${o.m?M:F}" font-size="${o.s||Z.fs}" font-weight="${o.w||400}"${o.a?` text-anchor="${o.a}"`:''}${o.ls?` letter-spacing="${o.ls}"`:''}>${e(t)}</text>`);
   const cardH=c=>Z.top+c.rows.length*Z.step+Z.bottom;
   const card=(c,x,y,w,h)=>{
     box(x,y,w,h);
@@ -3320,8 +3373,12 @@ function reportDraw(r, wide){
   // шапка
   p.push(`<rect x="0" y="0" width="${W}" height="${Z.hd}" fill="${T.ink}"/>`);
   p.push(`<rect x="0" y="${Z.hd-4}" width="${W}" height="${wide?3:4}" fill="${T.acc}"/>`);
-  tx(P,wide?42:52,'balance',{s:Z.logo,w:700});
-  p.push(`<circle cx="${wide?P+102:150}" cy="${wide?37:46}" r="${wide?4:5}" fill="${T.acc}"/>`);
+  // Знак и имя. Шрифт бренда в картинку не попадает (SVG рисуется через <img>),
+  // поэтому знак фигурой, а имя системным жирным
+  const ms=40, my=wide?12:22;
+  p.push(`<g transform="translate(${P} ${my}) scale(${ms/100})"><circle cx="50" cy="50" r="50" fill="${T.acc}"/>`+
+    `<path d="${MARK_PATH}" fill="none" stroke="${T.txt}" stroke-width="${MARK_W}" stroke-linejoin="round"/></g>`);
+  tx(P+ms+12,wide?42:52,'Даима',{s:Z.logo,w:700});
   tx(P,wide?64:82,`Отчёт ${per} · ${r.who}`,{s:Z.sub,c:T.mut});
   tx(W-P,wide?42:52,dt,{s:Z.sub,c:T.mut,a:'end'});
   let y = wide ? 100 : 144;
@@ -3364,7 +3421,7 @@ function reportDraw(r, wide){
 /* ── ОТЧЁТ: С КЕМ РАБОТАЛИ ──
    Не сводка цифрами, а поимённый список: кого касались за период, чем кончилось
    последнее касание и сдвинулся ли этап. Строка открывает карточку. */
-const PERIOD_NAME = {today:'за сегодня', week:'за 7 дней', month:'за 30 дней'};
+const PERIOD_NAME = {today:'за сегодня', week:'за 7 дней', month:'за 30 дней', all:'за всё время'};
 
 function workedRow(w, r){
   const l=w.lead;
@@ -3376,8 +3433,11 @@ function workedRow(w, r){
   // Время последнего касания, а не последней записи: смену этапа триггер пишет
   // секундой позже, и строка показывала бы момент, когда трубку уже положили
   const d=new Date(last ? last.created_at : w.last);
-  // За сегодня хватает часов; за неделю и месяц без даты не разобрать, когда это было
-  const when = (S.period==='today' ? '' : d.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})+' ')
+  // За сегодня хватает часов; за неделю и месяц без даты не разобрать, когда это было,
+  // а за всё время и без года, если касание было не в этом году
+  const old = d.getFullYear()!==new Date().getFullYear();
+  const when = (S.period==='today' ? '' : d.toLocaleDateString('ru-RU',
+      {day:'numeric',month:'short',...(old?{year:'numeric'}:{})})+' ')
     + d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
   const bits=[when];
   if(last) bits.push(touchTitle(last));
@@ -3442,7 +3502,7 @@ function reportScreen(){
   const chips=`<div class="wrap" style="padding-bottom:0">
     <div class="chips">${[['sum','Сводка'],['work','Лиды'],['log','Касания']]
       .map(([k,v])=>`<button class="chip ${S.repTab===k?'on':''}" data-rt="${k}">${v}</button>`).join('')}</div>
-    <div class="chips">${[['today','Сегодня'],['week','7 дней'],['month','30 дней']]
+    <div class="chips">${[['today','Сегодня'],['week','7 дней'],['month','30 дней'],['all','Всё время']]
       .map(([k,v])=>`<button class="chip ${S.period===k?'on':''}" data-p="${k}">${v}</button>`).join('')}</div>
     ${isAdmin()&&S.staff.length>1?`<div class="chips">
       <button class="chip ${S.repWho==='all'?'on':''}" data-w="all">Вся команда</button>
@@ -3474,7 +3534,7 @@ async function reportPNG(scale=2){
   const c=document.createElement('canvas');
   c.width=img.width*scale; c.height=img.height*scale;
   const g=c.getContext('2d');
-  g.fillStyle='#080808'; g.fillRect(0,0,c.width,c.height);
+  g.fillStyle='#FAFAF8'; g.fillRect(0,0,c.width,c.height);
   g.drawImage(img,0,0,c.width,c.height);
   const blob=await new Promise(ok=>c.toBlob(ok,'image/png'));
   if(!blob) throw new Error('Не удалось собрать картинку');
@@ -3482,7 +3542,7 @@ async function reportPNG(scale=2){
 }
 
 function reportName(){
-  return `balance-otchet-${S.period}-${iso(new Date())}.png`;
+  return `daima-otchet-${S.period}-${iso(new Date())}.png`;
 }
 
 /* ── НАВИГАЦИЯ ── */
@@ -3539,7 +3599,7 @@ function bind(){
   if(sht) sht.onclick=async()=>{
     const t=reportText(S.report);
     try{
-      if(navigator.share) await navigator.share({title:'Касания Balance', text:t});
+      if(navigator.share) await navigator.share({title:'Касания · Даима', text:t});
       else { await navigator.clipboard.writeText(t); toast('Отправка недоступна — текст скопирован'); }
     }catch(e){ if(e.name!=='AbortError') toast(e.message,true); }
   };
@@ -3564,7 +3624,7 @@ function bind(){
       const blob=await reportPNG();
       const file=new File([blob], reportName(), {type:'image/png'});
       if(navigator.canShare?.({files:[file]})){
-        await navigator.share({files:[file], title:'Отчёт Balance'});
+        await navigator.share({files:[file], title:'Отчёт · Даима'});
       }else{
         const a=document.createElement('a');
         a.href=URL.createObjectURL(blob); a.download=reportName(); a.click();
@@ -3596,7 +3656,7 @@ function bind(){
       const n=await rpc('apply_invites',{});
       if(n>0) toast('Аккаунт уже был: доступ выдан. Пароль можно выдать в карточке');
       else shareSheet('Приглашение создано', '',
-        `${name}, тебя пригласили в Balance CRM.\nОткрой ${appUrl()}\nВпиши почту ${email}, придумай пароль и нажми «Войти».`,
+        `${name}, тебя пригласили в CRM компании Даима.\nОткрой ${appUrl()}\nВпиши почту ${email}, придумай пароль и нажми «Войти».`,
         'Отправь это человеку. Первый вход создаст ему аккаунт с тем паролем, который он придумает.');
       refreshView();
     }catch(e){ toast(e.message.includes('duplicate')?'Открытое приглашение на эту почту уже есть':e.message,true); ivs.disabled=false; }
@@ -3627,7 +3687,7 @@ function bind(){
     try{
       const em=await rpc('set_staff_password',{p_id:S.person.id, p_password:pw});
       shareSheet(me?'Твой новый пароль':'Новый пароль', pw,
-        `Вход в Balance CRM: ${appUrl()}\nПочта: ${em}\nПароль: ${pw}`,
+        `Вход в CRM компании Даима: ${appUrl()}\nПочта: ${em}\nПароль: ${pw}`,
         me?'Запиши его. В этом браузере ты остаёшься в системе.':'Отправь это сотруднику: почта, пароль и ссылка уже в тексте.');
     }catch(e){ toast(/set_staff_password|404|PGRST202/.test(e.message)?'Сначала выполни в Supabase db/21_simple_login.sql':e.message,true); }
     psp.disabled=false;
