@@ -4050,7 +4050,12 @@ function bind(){
   const toggleAccess=async(on)=>{
     if(!on && !confirm(`Отключить доступ: ${S.person.name}? История касаний останется.`)) return;
     try{ await db(`profiles?id=eq.${S.person.id}`,{method:'PATCH',prefer:'return=minimal',body:JSON.stringify({active:on})});
-      S.person.active=on; toast(on?'Доступ включён':'Доступ отключён'); refreshView();
+      // Перерисовать сразу: тихое обновление карточки видит те же план и уроки и экран
+      // не трогает — оставались старые кнопки, и «Удалить совсем» не появлялась
+      S.person.active=on;
+      const st=S.staff.find(u=>u.id===S.person.id); if(st) st.active=on;
+      CACHE.delete('team'); saveBoot(); render();
+      toast(on?'Доступ включён':'Доступ отключён. Теперь сотрудника можно удалить совсем');
     }catch(e){ toast(e.message,true); }
   };
   // Письма не доходят, поэтому «забыл пароль» решает админ: новый пароль сразу на экране
