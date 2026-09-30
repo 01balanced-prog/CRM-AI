@@ -1,5 +1,5 @@
 // CRM Даима — кэш оболочки. Данные всегда берутся из сети.
-const V = 'daima-crm-v24';
+const V = 'daima-crm-v25';
 // Иконки под новыми именами: под старым адресом телефон держал бы прежнюю картинку
 const SHELL = ['./', './index.html', './manifest.json', './daima-180.png?v=2', './daima-192.png?v=2', './daima-512.png?v=2',
   './fonts/ibm-plex-sans-cyrillic.woff2', './fonts/ibm-plex-sans-latin.woff2', './fonts/unbounded-cyrillic.woff2'];
