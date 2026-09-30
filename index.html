@@ -849,7 +849,12 @@ async function boot(){
   try{
     if(!t) throw Object.assign(new TypeError('Failed to fetch'), {boot:true});
     const p = await db(`profiles?id=eq.${s.user.id}&select=*`);
-    if(!p.length){ S.prof=null; LS.del('boot'); return render(); }
+    if(!p.length){
+      S.prof=null; LS.del('boot');
+      // Отключён или чужой аккаунт — спрашиваем базу (db/23). Нет функции — покажем хотя бы почту
+      S.access = await rpc('my_access', {}).catch(()=>null);
+      return render();
+    }
     S.prof = p[0];
     [S.tariffs, S.segments] = await Promise.all([db('tariffs?select=*&order=sort_order'), db('segments?select=*&order=sort_order,name'), loadDicts()]);
     if(S.prof.role==='admin') S.staff = await db('profiles?select=id,name,role,active,started_at,ramp_enabled&order=name');
@@ -1368,16 +1373,27 @@ function authErr(e){
   return m;
 }
 
+// Почему нет доступа — из my_access() (db/23): отключён или у этой почты нет сотрудника.
+// Почта входа видна всегда: самая частая причина — вошли не под той почтой.
 function noAccessScreen(){
+  const a=S.access||{}, em=a.email||S.user?.email||'';
+  const text = a.state==='inactive'
+    ? `Сотрудник ${esc(a.name||'')} отключён. Попроси администратора включить доступ:
+       «Команда» → карточка сотрудника → «Включить доступ».`
+    : a.state==='none'
+    ? `У этой почты нет сотрудника в CRM. Если ты вошёл не под той почтой — выйди и войди
+       с рабочей. Если почта верная — попроси администратора пригласить её в «Команде».`
+    : `Учётная запись есть, но сотрудника с доступом для неё нет: либо он отключён, либо
+       эту почту не приглашали. Попроси администратора проверить в «Команде».`;
   return `<div class="login">${LOGO()}
   <p class="tag">Доступ не выдан</p>
-  <div class="card"><p style="margin:0;font-size:14.5px;line-height:1.6">
-  Учётная запись есть, но она не привязана к сотруднику. Попроси администратора
-  добавить тебя в CRM.</p></div>
-  <button class="btn ghost" id="out">Выйти</button></div>`;
+  <div class="card">${em?`<p style="margin:0 0 8px;font-size:13px;color:var(--muted)">Вход под почтой</p>
+    <p style="margin:0 0 12px;font-weight:600;word-break:break-all">${esc(em)}</p>`:''}
+    <p style="margin:0;font-size:14.5px;line-height:1.6">${text}</p></div>
+  <button class="btn ghost" id="out">Выйти и войти под другой почтой</button></div>`;
 }
 function bindNoAccess(){
-  document.getElementById('out').onclick=()=>{ LS.del('sess'); LS.del('boot'); S.user=null; S.prof=null; render(); };
+  document.getElementById('out').onclick=()=>{ LS.del('sess'); LS.del('boot'); S.user=null; S.prof=null; S.access=null; render(); };
 }
 // Первый запуск без связи: кэша профиля ещё нет, показать нечего. Сессию не трогаем.
 function offlineScreen(){
@@ -2650,7 +2666,10 @@ function personScreen(){
     <button class="btn ghost" id="ps_save" style="margin-top:12px">Сохранить</button>
     ${p.active?`<button class="btn ghost" id="ps_pwd">${me?'Сменить свой пароль':'Выдать новый пароль'}</button>`:''}
     ${me?'':p.active?`<button class="btn warn" id="ps_off">Отключить доступ</button>`
-                    :`<button class="btn" id="ps_on">Включить доступ</button>`}
+                    :`<button class="btn" id="ps_on">Включить доступ</button>
+                      <button class="btn warn" id="ps_del">Удалить совсем</button>
+                      <p class="note">Удалить можно только отключённого. Если сотрудник просто ушёл,
+                      лучше оставить отключённым: в журнале и отчётах остаётся его имя.</p>`}
   </div>`;
   const today = d.today ? planBlock(d.today, 0, true) : '';
   const pl=d.plan||{};
@@ -4050,6 +4069,20 @@ function bind(){
   };
   const pso=document.getElementById('ps_off'); if(pso) pso.onclick=()=>toggleAccess(false);
   const psn=document.getElementById('ps_on');  if(psn) psn.onclick=()=>toggleAccess(true);
+  // Удалить совсем (db/23, delete_staff): аккаунт, профиль, план, уроки. Лиды станут
+  // ничьими, касания в журнале останутся без автора
+  const psd=document.getElementById('ps_del');
+  if(psd) psd.onclick=async()=>{
+    if(!confirm(`Удалить ${S.person.name} совсем?\n\nАккаунт входа и профиль удалятся навсегда. `
+      +`Его лиды станут ничьими, касания в журнале останутся, но без имени автора. Отменить нельзя.`)) return;
+    psd.disabled=true;
+    try{
+      await rpc('delete_staff', {p_id:S.person.id});
+      S.staff=S.staff.filter(u=>u.id!==S.person.id); saveBoot();
+      [...CACHE.keys()].filter(k=>k.startsWith('list|')||k.startsWith('report|')||k==='team'||k==='today').forEach(k=>CACHE.delete(k));
+      toast(`${S.person.name} удалён`); S.person=null; go('team');
+    }catch(e){ toast(/delete_staff|404|PGRST202/.test(e.message)?'Сначала выполни в Supabase db/23_access_delete.sql':e.message,true); psd.disabled=false; }
+  };
 
   const pps=document.getElementById('pp_save');
   if(pps) pps.onclick=async()=>{
